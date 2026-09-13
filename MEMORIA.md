@@ -324,12 +324,21 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *Decisión:* No se violan las políticas de Google Play / Apple Store. Se implementa interfaz señuelo ("Field Notes") y Duress PIN para protección en inspección física.
 *   **ADR-004 (2026-09-13): Row Level Security (RLS) Estricto con Funciones SECURITY DEFINER.**  
     *Decisión:* RLS activo en el 100% de las tablas. Se implementan funciones auxiliares `get_auth_org_id()` y `get_auth_role()` con `SECURITY DEFINER` para evaluar pertenencia a organización y rol sin incurrir en recursión infinita en PostgreSQL. Se garantiza inmutabilidad absoluta de `audit_logs` (sin UPDATE ni DELETE).
+*   **ADR-005 (2026-09-13): Next.js 15 App Router + MapLibre GL para Consola RSO y Edge APIs.**  
+    *Decisión:* La consola de mando del RSO se implementa con Next.js 15 (App Router), Tailwind CSS y MapLibre GL para visualización cartográfica táctica y soporte de capas GeoJSON vectoriales sin depender de SDKs cerrados. Las rutas API (`/api/zones`, `/api/telemetry`, `/api/alerts`) orquestan la evaluación espacial en PostGIS y el despacho de notificaciones de emergencia con Firebase Admin SDK (FCM).
 
 ---
 
-## 8. Siguientes Pasos de Implementación
+## 8. Estado de Implementación y Próximos Sprints
 
-1. [x] **Ejecución DDL y RLS en Supabase:** Esquema PostGIS inicial desplegado y **Row Level Security (RLS) activo** con políticas multi-tenant (`sql/001_initial_schema_postgis.sql` y `sql/002_rls_security_policies.sql`) en `hyhfdzribmathwridokg`.
-2. [ ] **Inicialización Next.js en Vercel:** Estructura de proyecto en `/home/daniel/GZN` con TypeScript, Tailwind y MapLibre GL.
-3. [ ] **API de Ingesta y Geofencing:** Endpoint `/api/zones` y endpoint de telemetría con llamada a `check_point_zones`.
-4. [ ] **Conector Firebase Admin SDK:** Configuración de envío de push notifications de prueba hacia `greenzonenavigator`.
+1. [x] **Base de Datos & Seguridad en Supabase:** Esquema PostGIS desplegado y **Row Level Security (RLS) activo** con políticas multi-tenant (`sql/001_initial_schema_postgis.sql` y `sql/002_rls_security_policies.sql`) en `hyhfdzribmathwridokg`.
+2. [x] **Consola RSO & Core Backend en Next.js:** Estructura completa inicializada en `/home/daniel/GZN` con TypeScript, Tailwind CSS táctico y visor cartográfico MapLibre GL (`src/app/page.tsx`). Compilación verificada con `pnpm build` (exit code 0).
+3. [x] **APIs de Geofencing y Alertas:**
+   *   `GET/POST /api/zones`: CRUD de geometrías GeoJSON para Zonas Rojas, Ámbar y Safe Havens.
+   *   `POST /api/telemetry`: Ingesta de pings GPS, ejecución de `check_point_zones` en PostGIS y escalada automática de estado a `DANGER` y alerta al RSO.
+   *   `GET/POST /api/alerts`: Listado de incidencias y disparo de Botón de Pánico SOS con broadcast inmediato.
+4. [x] **Conector Firebase Admin SDK:** Integrado en `src/lib/firebase/admin.ts` para despacho de push de alta prioridad vía FCM (`sendEmergencyPushToTopic`).
+5. [ ] **Próximo Hito — Conexión en Vivo & Despliegue en Vercel:**
+   *   Vincular variables de entorno en Vercel y repositorio GitHub.
+   *   Módulo interactivo de dibujo de polígonos (MapLibre Draw) directamente desde la consola RSO.
+   *   Pruebas de ingesta de telemetría en tiempo real desde terminal móvil / emulador.
