@@ -322,12 +322,14 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *Decisión:* El ruteo no puede depender exclusivamente de APIs cloud. La app móvil incluirá un motor embebido (GraphHopper/Valhalla) con el grafo vial y zonas precargadas para navegación sin red.
 *   **ADR-003 (2026-09-13): Descarte del Modo Oculto Puro / Adopción de Silent Duress.**  
     *Decisión:* No se violan las políticas de Google Play / Apple Store. Se implementa interfaz señuelo ("Field Notes") y Duress PIN para protección en inspección física.
+*   **ADR-004 (2026-09-13): Row Level Security (RLS) Estricto con Funciones SECURITY DEFINER.**  
+    *Decisión:* RLS activo en el 100% de las tablas. Se implementan funciones auxiliares `get_auth_org_id()` y `get_auth_role()` con `SECURITY DEFINER` para evaluar pertenencia a organización y rol sin incurrir en recursión infinita en PostgreSQL. Se garantiza inmutabilidad absoluta de `audit_logs` (sin UPDATE ni DELETE).
 
 ---
 
 ## 8. Siguientes Pasos de Implementación
 
-1. [ ] **Ejecución DDL en Supabase:** Correr el script PostGIS en el dashboard de `hyhfdzribmathwridokg`.
+1. [x] **Ejecución DDL y RLS en Supabase:** Esquema PostGIS inicial desplegado y **Row Level Security (RLS) activo** con políticas multi-tenant (`sql/001_initial_schema_postgis.sql` y `sql/002_rls_security_policies.sql`) en `hyhfdzribmathwridokg`.
 2. [ ] **Inicialización Next.js en Vercel:** Estructura de proyecto en `/home/daniel/GZN` con TypeScript, Tailwind y MapLibre GL.
 3. [ ] **API de Ingesta y Geofencing:** Endpoint `/api/zones` y endpoint de telemetría con llamada a `check_point_zones`.
 4. [ ] **Conector Firebase Admin SDK:** Configuración de envío de push notifications de prueba hacia `greenzonenavigator`.
