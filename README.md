@@ -1,2 +1,2 @@
-# minutas
-Aplicación para gestión de minutas semanales de proyecto
+# GZN
+Aplicación para gestión de recursos expatriados.
