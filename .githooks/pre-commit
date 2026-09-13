@@ -1,0 +1,14 @@
+#!/bin/bash
+# Hook de git pre-commit para GZN: Asegurar que MEMORIA.md existe y no se pierde en los commits
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+MEMORIA_FILE="$ROOT_DIR/MEMORIA.md"
+
+if [ ! -f "$MEMORIA_FILE" ]; then
+    echo "❌ ERROR: No se encuentra el archivo MEMORIA.md en la raíz del proyecto."
+    echo "En GZN, toda la arquitectura, decisiones y avance deben estar documentados en la memoria."
+    exit 1
+fi
+
+echo "✅ GZN Pre-Commit: MEMORIA.md presente y validada."
+exit 0

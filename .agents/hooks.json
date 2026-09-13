@@ -1,0 +1,22 @@
+{
+  "gzn-memory-enforcer": {
+    "enabled": true,
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "./scripts/memory-hook.sh pre-invocation"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "run_command|write_to_file|replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/memory-hook.sh post-tool"
+          }
+        ]
+      }
+    ]
+  }
+}
