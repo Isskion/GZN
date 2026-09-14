@@ -45,6 +45,11 @@ BEGIN
         RAISE EXCEPTION 'No se pudo determinar la organizacion del usuario o el usuario no esta autenticado';
     END IF;
 
+    -- Control de acceso por rol: Solo RSO, ORG_ADMIN y SUPER_ADMIN pueden crear zonas
+    IF public.get_auth_role() NOT IN ('RSO', 'ORG_ADMIN', 'SUPER_ADMIN') THEN
+        RAISE EXCEPTION 'Rol insuficiente para crear zonas: se requiere RSO, ORG_ADMIN o SUPER_ADMIN';
+    END IF;
+
     IF p_name IS NULL OR TRIM(p_name) = '' THEN
         RAISE EXCEPTION 'El nombre de la zona (p_name) es obligatorio';
     END IF;

@@ -136,10 +136,10 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      // Devolver error de Postgres controlado sin fallback silencioso
+      const isForbidden = error.message?.includes('Rol insuficiente');
       return NextResponse.json(
-        { error: `Error al crear zona en base de datos: ${error.message}` },
-        { status: 400 }
+        { error: `Error al crear zona: ${error.message}` },
+        { status: isForbidden ? 403 : 400 }
       );
     }
 
