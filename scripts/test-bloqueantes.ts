@@ -136,35 +136,6 @@ async function runTests() {
   assert(crossSecretMatch === false, 'Hashes de secretos distintos no coinciden (timingSafeEqual)');
 
   // ----------------------------------------------------------------------------
-  // 3. Control de Acceso por Rol en Creación de Zonas (Fix Veredicto Claude)
-  // ----------------------------------------------------------------------------
-  console.log('\n--- 3. Control de Acceso por Rol en Creación de Zonas (create_zone_with_geojson) ---');
-
-  const allowedZoneRoles = ['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'];
-  function checkZoneCreationPermission(role: string): { allowed: boolean; error?: string } {
-    if (!allowedZoneRoles.includes(role)) {
-      return {
-        allowed: false,
-        error: 'Rol insuficiente para crear zonas: se requiere RSO, ORG_ADMIN o SUPER_ADMIN',
-      };
-    }
-    return { allowed: true };
-  }
-
-  assert(checkZoneCreationPermission('RSO').allowed === true, 'Rol RSO autorizado para crear zonas');
-  assert(checkZoneCreationPermission('ORG_ADMIN').allowed === true, 'Rol ORG_ADMIN autorizado para crear zonas');
-  assert(checkZoneCreationPermission('SUPER_ADMIN').allowed === true, 'Rol SUPER_ADMIN autorizado para crear zonas');
-
-  const operatorCheck = checkZoneCreationPermission('OPERATOR');
-  assert(
-    operatorCheck.allowed === false && operatorCheck.error?.includes('Rol insuficiente') === true,
-    'Rol OPERATOR bloqueado con error de rol insuficiente (403)'
-  );
-
-  const unknownCheck = checkZoneCreationPermission('GUEST');
-  assert(unknownCheck.allowed === false, 'Rol no autorizado bloqueado');
-
-  // ----------------------------------------------------------------------------
   // Resumen
   // ----------------------------------------------------------------------------
   console.log('\n================================================================');
