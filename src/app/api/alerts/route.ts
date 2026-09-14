@@ -1,15 +1,28 @@
+// ==============================================================================
+// GZN — API ROUTE: INCIDENCIAS Y BOTÓN DE PÁNICO SOS
+// ==============================================================================
+
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/admin';
+import { getAuthenticatedSession } from '@/lib/auth/session';
+import { verifyDeviceAuth, triggerDevicePanicAlert } from '@/lib/auth/device';
 import { sendEmergencyPushToTopic } from '@/lib/firebase/admin';
 
-// GET /api/alerts — Listar alertas activas
+// GET /api/alerts — Listar alertas activas de la organización
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createAdminClient();
+    const { authenticated, supabase, error: authError } = await getAuthenticatedSession(request);
+
+    if (!authenticated || !supabase) {
+      return NextResponse.json(
+        { error: `No autorizado: ${authError || 'Se requiere sesión de usuario activa'}` },
+        { status: 401 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
-    const orgId = searchParams.get('organization_id');
     const status = searchParams.get('status') || 'OPEN';
 
+    // RLS filtra automáticamente por la organización del usuario en sesión
     let query = supabase
       .from('alerts')
       .select(`
@@ -29,9 +42,6 @@ export async function GET(request: NextRequest) {
       `)
       .order('created_at', { ascending: false });
 
-    if (orgId) {
-      query = query.eq('organization_id', orgId);
-    }
     if (status !== 'ALL') {
       query = query.eq('status', status);
     }
@@ -48,11 +58,15 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/alerts — Disparo de Botón de Pánico / SOS
+// POST /api/alerts — Disparo de Botón de Pánico / SOS (Dispositivo móvil o RSO autenticado)
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createAdminClient();
-    const body = await request.json();
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Cuerpo de la petición JSON inválido o malformado' }, { status: 400 });
+    }
 
     const { traveler_id, latitude, longitude, memo, alert_type } = body;
 
@@ -63,7 +77,42 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. Obtener viajero
+    // Comprobación de autenticación dual: Secreto de dispositivo móvil O Sesión de usuario RSO
+    const hasDeviceSecret = request.headers.has('x-device-secret');
+
+    if (hasDeviceSecret) {
+      // 1. Vía Terminal Móvil: Verificar autenticidad del dispositivo con su secreto pre-compartido
+      const deviceAuth = await verifyDeviceAuth(request, traveler_id);
+
+      if (!deviceAuth.authenticated || !deviceAuth.traveler) {
+        return NextResponse.json(
+          { error: `No autorizado: ${deviceAuth.error || 'Credencial de dispositivo inválida'}` },
+          { status: 401 }
+        );
+      }
+
+      const alertData = await triggerDevicePanicAlert(
+        deviceAuth.traveler,
+        latitude,
+        longitude,
+        memo,
+        alert_type
+      );
+
+      return NextResponse.json({ success: true, alert: alertData }, { status: 201 });
+    }
+
+    // 2. Vía Consola RSO: Verificar sesión activa de usuario operador
+    const { authenticated, supabase, user, error: authError } = await getAuthenticatedSession(request);
+
+    if (!authenticated || !supabase || !user) {
+      return NextResponse.json(
+        { error: 'No autorizado: Se requiere cabecera x-device-secret o sesión activa de usuario RSO.' },
+        { status: 401 }
+      );
+    }
+
+    // Obtener viajero con el cliente de sesión (RLS impide acceder a viajeros de otra organización)
     const { data: traveler, error: travelerError } = await supabase
       .from('travelers')
       .select('id, organization_id, full_name, callsign, phone')
@@ -71,13 +120,16 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (travelerError || !traveler) {
-      return NextResponse.json({ error: 'Viajero no encontrado' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Viajero no encontrado o no pertenece a la organización del usuario autenticado' },
+        { status: 404 }
+      );
     }
 
     const orgId = traveler.organization_id;
-    const type = alert_type || 'PANIC_BUTTON';
+    const type = alert_type || 'MANUAL_SOS';
 
-    // 2. Insertar alerta de pánico
+    // Insertar alerta con cliente de sesión (RLS valida pertenencia)
     const { data: alertData, error: alertError } = await supabase
       .from('alerts')
       .insert({
@@ -87,7 +139,7 @@ export async function POST(request: NextRequest) {
         severity: 'CRITICAL',
         latitude,
         longitude,
-        memo: memo || '¡BOTÓN DE PÁNICO ACTIVADO POR EL VIAJERO!',
+        memo: memo || '¡SOS MANUAL ACTIVADO POR EL OPERADOR RSO!',
         status: 'OPEN',
       })
       .select()
@@ -97,7 +149,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: alertError.message }, { status: 500 });
     }
 
-    // 3. Cambiar estado del viajero a PANIC
+    // Actualizar estado del viajero a PANIC
     await supabase
       .from('travelers')
       .update({
@@ -108,16 +160,16 @@ export async function POST(request: NextRequest) {
       })
       .eq('id', traveler.id);
 
-    // 4. Enviar notificación push de emergencia inmediata a la consola y móviles RSO
+    // Despacho de push de emergencia
     await sendEmergencyPushToTopic(
       `org_${orgId}_alerts`,
-      '🚨 SOS: ¡BOTÓN DE PÁNICO ACTIVADO!',
-      `${traveler.full_name} (${traveler.callsign || 'Viajero'}) requiere auxilio inmediato en (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
+      '🚨 SOS MANUAL RSO: Auxilio Solicitado',
+      `${traveler.full_name} (${traveler.callsign || 'Viajero'}) marcado en emergencia crítica en (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
       {
         alert_id: alertData.id,
         traveler_id: traveler.id,
         severity: 'CRITICAL',
-        type: 'PANIC_BUTTON',
+        type: 'MANUAL_SOS',
       }
     );
 

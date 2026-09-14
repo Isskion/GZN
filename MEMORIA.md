@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS public.travelers (
     last_longitude DOUBLE PRECISION,
     last_ping_at TIMESTAMPTZ,
     battery_level INT,
+    device_secret_hash TEXT, -- Hash SHA-256 de secreto de hardware (escalón intermedio hacia ECDSA P-256)
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -274,6 +275,24 @@ AS $$
     ORDER BY distance_meters ASC
     LIMIT 1;
 $$;
+
+-- Creación segura de zona con geometría GeoJSON y PostGIS ST_GeomFromGeoJSON
+CREATE OR REPLACE FUNCTION public.create_zone_with_geojson(
+    p_org_id UUID DEFAULT NULL,
+    p_name TEXT DEFAULT NULL,
+    p_description TEXT DEFAULT NULL,
+    p_severity TEXT DEFAULT NULL,
+    p_color_hex TEXT DEFAULT NULL,
+    p_geojson TEXT DEFAULT NULL,
+    p_valid_until TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS public.zones
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+... (ver sql/003_zone_creation_rpc.sql para implementación completa)
+$$;
 ```
 
 ---
@@ -326,6 +345,11 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *Decisión:* RLS activo en el 100% de las tablas. Se implementan funciones auxiliares `get_auth_org_id()` y `get_auth_role()` con `SECURITY DEFINER` para evaluar pertenencia a organización y rol sin incurrir en recursión infinita en PostgreSQL. Se garantiza inmutabilidad absoluta de `audit_logs` (sin UPDATE ni DELETE).
 *   **ADR-005 (2026-09-13): Next.js 15 App Router + MapLibre GL para Consola RSO y Edge APIs.**  
     *Decisión:* La consola de mando del RSO se implementa con Next.js 15 (App Router), Tailwind CSS y MapLibre GL para visualización cartográfica táctica y soporte de capas GeoJSON vectoriales sin depender de SDKs cerrados. Las rutas API (`/api/zones`, `/api/telemetry`, `/api/alerts`) orquestan la evaluación espacial en PostGIS y el despacho de notificaciones de emergencia con Firebase Admin SDK (FCM).
+*   **ADR-006 (2026-09-14): Autenticación Dual RSO/Dispositivo, Tenancy Estricto y RPC PostGIS GeoJSON.**  
+    *Decisión:* Resolución de los Bloqueantes 1 y 2 de la auditoría:
+    1. **Autenticación Consola RSO:** `/api/zones` (GET/POST) y `/api/alerts` (GET) sustituyen el cliente `createAdminClient` por el cliente de sesión `createClient` respetando RLS. Se elimina el parámetro `organization_id` del query/body; la pertenencia se deriva estrictamente de `public.get_auth_org_id()` vía Postgres.
+    2. **Autenticación Terminal Móvil (Escalón Intermedio):** `/api/telemetry` y `/api/alerts` (SOS móvil) exigen la cabecera `x-device-secret`, validada contra `travelers.device_secret_hash` (SHA-256 en tiempo constante). Se documenta expresamente como paso intermedio previo al binding criptográfico asimétrico ECDSA P-256 definitivo (Hoja de Ruta Subsistema 1). Ningún endpoint en `src/app/api/` usa `createAdminClient` directamente.
+    3. **Creación de Zonas e Integridad Geoespacial:** Despliegue de `sql/003_zone_creation_rpc.sql` con la función RPC `create_zone_with_geojson` (usa `ST_GeomFromGeoJSON`, `ST_SetSRID` en 4326 y `ST_IsValid`). Se elimina el fallback de inserción directa silenciosa en el route handler y se implementa validador estricto en servidor (`validateGeoJSONPolygon`) para devolver 400 controlado ante geometrías malformadas o anillos no cerrados.
 
 ---
 
@@ -333,12 +357,17 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
 
 1. [x] **Base de Datos & Seguridad en Supabase:** Esquema PostGIS desplegado y **Row Level Security (RLS) activo** con políticas multi-tenant (`sql/001_initial_schema_postgis.sql` y `sql/002_rls_security_policies.sql`) en `hyhfdzribmathwridokg`.
 2. [x] **Consola RSO & Core Backend en Next.js:** Estructura completa inicializada en `/home/daniel/GZN` con TypeScript, Tailwind CSS táctico y visor cartográfico MapLibre GL (`src/app/page.tsx`). Compilación verificada con `pnpm build` (exit code 0).
-3. [x] **APIs de Geofencing y Alertas:**
-   *   `GET/POST /api/zones`: CRUD de geometrías GeoJSON para Zonas Rojas, Ámbar y Safe Havens.
-   *   `POST /api/telemetry`: Ingesta de pings GPS, ejecución de `check_point_zones` en PostGIS y escalada automática de estado a `DANGER` y alerta al RSO.
-   *   `GET/POST /api/alerts`: Listado de incidencias y disparo de Botón de Pánico SOS con broadcast inmediato.
-4. [x] **Conector Firebase Admin SDK:** Integrado en `src/lib/firebase/admin.ts` para despacho de push de alta prioridad vía FCM (`sendEmergencyPushToTopic`).
-5. [ ] **Próximo Hito — Conexión en Vivo & Despliegue en Vercel:**
-   *   Vincular variables de entorno en Vercel y repositorio GitHub.
+3. [x] **Resolución Bloqueante 1 (Auditoría 2026-09-14):**
+   *   Autenticación de sesión en `/api/zones` (GET/POST) y `/api/alerts` (GET).
+   *   Autenticación de hardware pre-compartido (`x-device-secret` + `device_secret_hash` SHA-256) en `/api/telemetry` y `/api/alerts` (SOS).
+   *   Eliminación de `createAdminClient()` en todas las rutas de `src/app/api/`.
+   *   Multi-tenancy forzado por RLS (`get_auth_org_id()`), prohibiendo inyección de `organization_id` por cliente.
+4. [x] **Resolución Bloqueante 2 (Auditoría 2026-09-14):**
+   *   Script `sql/003_zone_creation_rpc.sql` con la RPC `create_zone_with_geojson` y `get_active_zones`.
+   *   Validador TypeScript `validateGeoJSONPolygon` en `src/lib/geo/validation.ts` (retorna 400 descriptivo ante polígonos no cerrados o vértices inválidos).
+   *   Eliminación del fallback silencioso en `POST /api/zones`.
+5. [ ] **Próximo Hito — Revisión de Claude & Despliegue en Vercel:**
+   *   Superar checklist de auditoría de Claude en `intercambio/desde-claude/`.
+   *   Vincular variables de entorno en Vercel y repositorio GitHub tras visto bueno explícito.
    *   Módulo interactivo de dibujo de polígonos (MapLibre Draw) directamente desde la consola RSO.
-   *   Pruebas de ingesta de telemetría en tiempo real desde terminal móvil / emulador.
+
