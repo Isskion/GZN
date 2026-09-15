@@ -12,7 +12,7 @@
 | :--- | :--- | :--- |
 | **Repositorio Central** | [`https://github.com/Isskion/GZN`](https://github.com/Isskion/GZN) | Código fuente unificado (Backend, Web RSO, Scripts de infraestructura). |
 | **Base de Datos & Geo** | **Supabase** (`hyhfdzribmathwridokg`)<br>API: `https://hyhfdzribmathwridokg.supabase.co` | **Fuente de la Verdad:** PostgreSQL + PostGIS nativo, RLS multi-tenant, Auth/SSO y Realtime WebSockets para el mapa en vivo. |
-| **Alertas & Push** | **Firebase / Firestore** (`greenzonenavigator`) | **Canal de Emergencia:** Firebase Cloud Messaging (FCM) para push prioritarias accionables y telemetría efímera de alta frecuencia. |
+| **Alertas & Push** | **Firebase (FCM)** (`greenzonenavigator`) | **Canal de Emergencia:** Firebase Cloud Messaging (FCM via Firebase Admin SDK) para entrega instantánea de notificaciones push prioritarias y alertas críticas de misión hacia los RSOs. |
 | **Alojamiento & Edge** | **Vercel** | Despliegue de la Consola Web RSO (Next.js App Router + MapLibre GL) y Serverless API Endpoints. |
 | **Cartografía Base** | MapLibre GL + MapTiler / PMTiles | Capas vectoriales base sin telemetría de terceros ni fuga de privacidad. |
 
@@ -330,26 +330,24 @@ $$;
 
 ---
 
-## 5. Colecciones Firestore (Telemetría de Alta Frecuencia y Broadcasts)
+## 5. Arquitectura de Almacén Único (PostgreSQL + PostGIS) y Despacho Push (Firebase FCM)
 
-Para no saturar la base de datos relacional de Supabase con pings cada segundo, Firebase Firestore almacena la telemetría en tránsito:
+En concordancia con el Punto 6 de la auditoría y la evolución real de la plataforma, se descarta el almacenamiento intermedio en colecciones no implementadas de Firestore (`active_telemetry`, `broadcast_alerts`, `sos_channel`).
 
-1. **`active_telemetry/{travelerId}`**:
-   *   `current_lat`: double
-   *   `current_lon`: double
-   *   `speed_kmh`: double
-   *   `heading_degrees`: double
-   *   `battery_percent`: int
-   *   `updated_at`: timestamp
-2. **`broadcast_alerts/{alertId}`**:
-   *   `organization_id`: string
-   *   `target_group`: "ALL" | list of travelerIds
-   *   `title`: string (ej. *"ALERTA DE SEGURIDAD: Evacuar hacia Base Alfa"*)
-   *   `body`: string
-   *   `requires_ack`: boolean (botón de confirmación OK)
-   *   `sent_at`: timestamp
-3. **`sos_channel/{alertId}`**:
-   *   Canal de telemetría de emergencia y pánicos activos.
+### 5.1. PostgreSQL + PostGIS como Fuente Única de la Verdad
+Toda la persistencia de datos de GZN se consolida en Supabase (PostgreSQL 15 + PostGIS):
+*   **Telemetría y Posicionamiento:** Los pings de telemetría de terminales móviles (`POST /api/telemetry`) actualizan directamente `public.travelers` (`last_latitude`, `last_longitude`, `battery_level`, `status`, `last_ping_at`) e insertan eventos forenses en `public.audit_logs`.
+*   **Motor Geoespacial en Servidor:** Las funciones RPC (`check_point_zones`, `find_nearest_safe_haven`, `create_zone_with_geojson`) ejecutan la evaluación de geofencing y cálculo métrico en milisegundos directamente sobre índices espaciales `GIST`.
+*   **Ciclo de Vida de Alertas:** Las incidencias y pánicos se gestionan en `public.alerts`, controladas por RLS multi-tenant.
+
+### 5.2. Firebase Cloud Messaging (FCM): Pasarela Exclusiva de Notificaciones Push
+Firebase se reserva exclusivamente para el despacho de mensajería push de alta prioridad mediante `firebase-admin/messaging` (`src/lib/firebase/admin.ts`):
+*   **Canales Tópicos por Organización:** Los RSOs y operadores suscritos al tópico `org_{orgId}_alerts` reciben notificaciones en tiempo real ante eventos críticos.
+*   **Disparadores Activos:**
+    1. Violación de Zona Roja (`ZONE_VIOLATION` detectada en telemetría).
+    2. Botón de Pánico SOS accionado por un viajero en campo (`PANIC_BUTTON`).
+    3. SOS manual despachado por un operador RSO (`MANUAL_SOS`).
+*   **Configuración de Prioridad:** Envíos con `priority: 'high'` y flag `contentAvailable: true` para notificación inmediata en dispositivos móviles.
 
 ---
 
@@ -368,8 +366,8 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
 
 ## 7. Registro de Decisiones de Arquitectura (ADR)
 
-*   **ADR-001 (2026-09-13): Adopción de Arquitectura Híbrida Supabase + Firestore.**  
-    *Decisión:* Supabase (PostgreSQL + PostGIS) almacena la estructura transaccional, geométrica y de auditoría inmutable. Firestore y FCM gestionan la entrega instantánea de notificaciones push prioritarias y la telemetría de alta frecuencia.
+*   **ADR-001 (2026-09-13 / Actualizado 2026-09-15): Arquitectura de Almacén Único (PostgreSQL + PostGIS) y Despacho Push con Firebase FCM.**  
+    *Decisión:* Corrección y sinceramiento tras la auditoría (Punto 6). Se descarta el almacenamiento efímero en colecciones no implementadas de Firestore (`active_telemetry`, `broadcast_alerts`, `sos_channel`) para evitar duplicidad de fuentes y complejidad innecesaria. Supabase (PostgreSQL + PostGIS) asume la totalidad de la persistencia transaccional, la telemetría en tiempo real, el geofencing espacial de alta velocidad y la auditoría inmutable. Firebase se reserva exclusivamente como pasarela de notificaciones push prioritarias mediante FCM (`firebase-admin`).
 *   **ADR-002 (2026-09-13): Ruteo Dual Online/Offline.**  
     *Decisión:* El ruteo no puede depender exclusivamente de APIs cloud. La app móvil incluirá un motor embebido (GraphHopper/Valhalla) con el grafo vial y zonas precargadas para navegación sin red.
 *   **ADR-003 (2026-09-13): Descarte del Modo Oculto Puro / Adopción de Silent Duress.**  
@@ -436,7 +434,27 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
    *   Registro en `POST /api/alerts` (`ALERT_TRIGGERED` discriminando RSO vs Hardware).
    *   Registro en `POST /api/telemetry` (`ZONE_VIOLATION_DETECTED` ante alertas rojas).
    *   Suite de pruebas automatizada ampliada a 26 tests (`scripts/test-bloqueantes.ts`).
-8. [ ] **Próximos Hitos (Sección "Importante" de la Auditoría):**
-   *   **Punto 6:** Sinceramiento de arquitectura en `MEMORIA.md` (restringir Firebase a FCM push).
-   *   Despliegue y vinculación en Vercel.
+8. [x] **Resolución Punto 6 — Sinceramiento de Arquitectura (Auditoría 2026-09-15):**
+   *   Sección 1 y Sección 5 actualizadas consolidando a PostgreSQL + PostGIS como almacén único de telemetría y geofencing.
+   *   Firebase formalizado exclusivamente como pasarela de notificaciones push prioritarias (FCM vía Firebase Admin SDK).
+   *   ADR-001 corregido eliminando referencias a colecciones no implementadas de Firestore.
+   *   Documentación de limitaciones conocidas (MultiPolygon, APNs Critical Alerts y maqueta de consola) incorporada en Sección 9.
+9. [ ] **Próximo Hito — Despliegue en Producción y Vinculación en Vercel:**
+   *   Superar checklist final de auditoría de Claude en `intercambio/desde-claude/`.
+   *   Configuración de variables de entorno de producción en Vercel y Supabase.
+   *   Conexión de la consola web reactiva MapLibre con las rutas API reales.
+
+---
+
+## 9. Limitaciones Conocidas de la Versión Actual (v1.0)
+
+En respuesta a la Sección *Menor* de la auditoría de Claude, se registran formalmente las siguientes limitaciones y compromisos de diseño para la versión actual:
+
+1. **Tipología Geométrica de Zonas (`zones.geom`):**  
+   La columna `zones.geom` utiliza `GEOMETRY(Polygon, 4326)`. Aunque la Hoja de Ruta v0.8 contempla perímetros disgregados (`MultiPolygon`), para el alcance del piloto actual se limita a polígonos simples conexos (`Polygon`). El soporte de `MultiPolygon` mediante `ST_Multi` queda registrado como limitación conocida para evaluar ante casos de uso territoriales que lo demanden explícitamente.
+2. **Sonido Táctico en Notificaciones Push APNs (iOS):**  
+   El despacho de pánico hacia dispositivos Apple utiliza `apns.aps.sound: 'default'`. Esta configuración no elude el modo silencio ni el modo "No Molestar" del iPhone. La activación de *Critical Alerts* de máxima prioridad auditiva está supeditada a la obtención del entitlement especial corporativo otorgado por Apple (Hoja de Ruta v0.9, Fase 0).
+3. **Consola Web RSO (`src/app/page.tsx`):**  
+   La visualización cartográfica actual en `src/app/page.tsx` opera como prototipo táctico interactivo con simulación de estados locales en memoria. En el siguiente sprint se sustituirán los datos estáticos por la suscripción reactiva a `GET /api/zones` y los disparos reales contra `/api/telemetry` y `/api/alerts`.
+
 
