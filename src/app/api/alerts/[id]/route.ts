@@ -53,8 +53,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         resolved_at,
         created_at,
         travelers (
-          id, full_name, callsign, phone, email, status, battery_level, 
-          medical_notes, emergency_contact_name, emergency_contact_phone
+          id, full_name, callsign, phone, email, status, battery_level
         ),
         zones (id, name, severity, color_hex, description, contact_phone, radio_frequency, gate_access_protocol),
         resolver:profiles!resolved_by (id, full_name, role)
