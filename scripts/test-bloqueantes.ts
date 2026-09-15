@@ -5,6 +5,13 @@
 import { validateGeoJSONPolygon, validateZoneEnhancements } from '../src/lib/geo/validation';
 import { hashDeviceSecret } from '../src/lib/auth/device';
 import { logAuditEvent, AuditLogEntry } from '../src/lib/audit/logger';
+import {
+  buildHereMultiLayerStyle,
+  formatTacticalCoordinates,
+  HERE_MAP_LAYERS,
+  setHereActiveLayer,
+  HERE_LAYER_PREFIX,
+} from '../src/lib/geo/hereMapStyles';
 import crypto from 'crypto';
 
 async function runTests() {
@@ -770,6 +777,87 @@ async function runTests() {
     payload: { title: 'Misión Ébano' },
   };
   assert(briefingDeletedEntry.action === 'BRIEFING_DELETED', 'Acción BRIEFING_DELETED registrada');
+
+  // ----------------------------------------------------------------------------
+  // 10. Módulo 2: Motor Cartográfico Profesional HERE + MapLibre GL
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 10. Motor Cartográfico Táctico HERE (Módulo 2) ---');
+
+  // Catálogo de capas tácticas
+  assert(HERE_MAP_LAYERS.length === 4, 'Catálogo HERE contiene exactamente 4 capas tácticas');
+  const layerIds = HERE_MAP_LAYERS.map((l) => l.id);
+  assert(layerIds.includes('explore.night'), 'Capa explore.night (Táctico C2) presente');
+  assert(layerIds.includes('satellite.day'), 'Capa satellite.day (Satélite HD) presente');
+  assert(layerIds.includes('explore.day'), 'Capa explore.day (Calles Diurno) presente');
+  assert(layerIds.includes('logistics.day'), 'Capa logistics.day (Logística Táctica) presente');
+
+  // Generación de StyleSpecification multi-capa
+  const mockApiKey = 'test-here-key-12345';
+  const hereStyle = buildHereMultiLayerStyle(mockApiKey, 'explore.night');
+  assert(hereStyle.version === 8, 'Versión de estilo MapLibre es 8');
+  assert(Object.keys(hereStyle.sources).length === 4, 'Generadas exactamente 4 fuentes raster de HERE');
+  assert(hereStyle.layers.length === 4, 'Generadas exactamente 4 capas raster de MapLibre');
+
+  // Comprobación de URLs seguras con API Key
+  const darkSource = hereStyle.sources['gzn-here-source-explore-night'] as any;
+  assert(darkSource && darkSource.type === 'raster', 'Fuente gzn-here-source-explore-night es de tipo raster');
+  assert(
+    darkSource.tiles[0].includes('apiKey=test-here-key-12345') && darkSource.tiles[0].includes('style=explore.night'),
+    'URL de tiles contiene apiKey y parámetro style=explore.night'
+  );
+
+  const satSource = hereStyle.sources['gzn-here-source-satellite-day'] as any;
+  assert(
+    satSource.tiles[0].includes('apiKey=test-here-key-12345') && satSource.tiles[0].includes('style=satellite.day'),
+    'URL de satélite contiene formato jpeg y style=satellite.day'
+  );
+
+  // Comprobación de visibilidad inicial
+  const darkLayer = hereStyle.layers.find((l) => l.id === 'gzn-here-layer-explore-night') as any;
+  assert(darkLayer.layout.visibility === 'visible', 'Capa nocturna explore.night visible por defecto');
+
+  const satLayer = hereStyle.layers.find((l) => l.id === 'gzn-here-layer-satellite-day') as any;
+  assert(satLayer.layout.visibility === 'none', 'Capa satélite satellite.day oculta por defecto');
+
+  // Conmutación de capas en caliente (Mock de MapLibre Map)
+  const layerVisibilityState: Record<string, string> = {
+    'gzn-here-layer-explore-night': 'visible',
+    'gzn-here-layer-satellite-day': 'none',
+    'gzn-here-layer-explore-day': 'none',
+    'gzn-here-layer-logistics-day': 'none',
+  };
+
+  const mockMap = {
+    getLayer: (id: string) => (layerVisibilityState[id] !== undefined ? { id } : null),
+    setLayoutProperty: (id: string, prop: string, value: string) => {
+      if (prop === 'visibility') {
+        layerVisibilityState[id] = value;
+      }
+    },
+  };
+
+  setHereActiveLayer(mockMap, 'satellite.day');
+  assert(
+    layerVisibilityState['gzn-here-layer-satellite-day'] === 'visible',
+    'Capa satélite satellite.day conmutada a visible'
+  );
+  assert(
+    layerVisibilityState['gzn-here-layer-explore-night'] === 'none',
+    'Capa explore.night conmutada a none tras cambio de capa'
+  );
+
+  // Formateador de Coordenadas Tácticas WGS84
+  const coordsMadrid = formatTacticalCoordinates(40.4168, -3.7038);
+  assert(coordsMadrid.hemispheres.latHem === 'N', 'Hemisferio Norte (N) detectado para latitud positiva');
+  assert(coordsMadrid.hemispheres.lonHem === 'W', 'Hemisferio Oeste (W) detectado para longitud negativa');
+  assert(coordsMadrid.dms.includes('40°25\'') && coordsMadrid.dms.includes('N'), 'Grados y minutos de latitud correctos');
+  assert(coordsMadrid.dms.includes('003°42\'') && coordsMadrid.dms.includes('W'), 'Grados y minutos de longitud correctos');
+  assert(coordsMadrid.decimal === '+40.416800°, -3.703800°', 'Formato decimal con signo exacto');
+
+  const coordsHemisferioSur = formatTacticalCoordinates(-12.0464, 77.0428);
+  assert(coordsHemisferioSur.hemispheres.latHem === 'S', 'Hemisferio Sur (S) detectado');
+  assert(coordsHemisferioSur.hemispheres.lonHem === 'E', 'Hemisferio Este (E) detectado');
+  assert(coordsHemisferioSur.dms.includes('12°02\'') && coordsHemisferioSur.dms.includes('S'), 'DMS latitud Sur formateada correctamente');
 
   // ----------------------------------------------------------------------------
   // Resumen

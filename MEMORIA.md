@@ -14,7 +14,7 @@
 | **Base de Datos & Geo** | **Supabase** (`hyhfdzribmathwridokg`)<br>API: `https://hyhfdzribmathwridokg.supabase.co` | **Fuente de la Verdad:** PostgreSQL + PostGIS nativo, RLS multi-tenant, Auth/SSO y Realtime WebSockets para el mapa en vivo. |
 | **Alertas & Push** | **Firebase (FCM)** (`greenzonenavigator`) | **Canal de Emergencia:** Firebase Cloud Messaging (FCM via Firebase Admin SDK) para entrega instantánea de notificaciones push prioritarias y alertas críticas de misión hacia los RSOs. |
 | **Alojamiento & Edge** | **Vercel** | Despliegue de la Consola Web RSO (Next.js App Router + MapLibre GL) y Serverless API Endpoints. |
-| **Cartografía Base** | MapLibre GL + MapTiler / PMTiles | Capas vectoriales base sin telemetría de terceros ni fuga de privacidad. |
+| **Cartografía Base** | **MapLibre GL + HERE Technologies API v3** | Capas tácticas HD de grado de defensa y automotriz (`explore.night`, `satellite.day`, `explore.day`, `logistics.day`) con multi-capa en caliente, sin telemetría publicitaria ni rastreo de directivos. |
 
 ---
 
@@ -501,6 +501,23 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     4. **Higiene de Despliegue (`.vercelignore`):** Aislamiento estricto en despliegues de producción, excluyendo de los builds de Vercel la carpeta de gobernanza `/intercambio/`, la documentación interna `MEMORIA.md`, los scripts de pruebas `scripts/`, las migraciones SQL locales `sql/` y la configuración interna `.github/`.
     5. **Vinculación a Vercel:** Proyecto enlazado bajo el equipo `isskions-projects` con el proyecto `gzn`, conectado al repositorio GitHub `Isskion/GZN` y desplegado en producción en `https://gzn-coral.vercel.app` para hosting serverless de la consola RSO y los endpoints del Core Backend.
 
+*   **ADR-016 (2026-09-15): Consola Web RSO — Motor Cartográfico Táctico Multi-Capa con HERE Technologies v3 y HUD WGS84 (Módulo 2).**  
+    *Decisión:* Sustitución de los tiles de demostración genéricos (`demotiles.maplibre.org`) por el motor cartográfico profesional de grado de defensa y automotriz de **HERE Technologies (API v3)**, integrando un conmutador multi-capa en caliente y un HUD táctico de telemetría WGS84:
+    1. **Soberanía y Privacidad de Datos:** HERE Technologies cumple con la directriz OpSec de GZN (no indexa telemetría corporativa ni rastrea a los directivos/viajeros, a diferencia de Google Maps o Apple MapKit).
+    2. **Catálogo de 4 Capas Tácticas HD:**  
+       - **Táctico Oscuro (`explore.night`):** Modo de visualización C2 / SOC de alto contraste por defecto, diseñado para resaltar sobre el fondo oscuro los perímetros de zonas rojas (`#EF4444`), toques de queda ámbar (`#F59E0B`) y balizas de convoyes.
+       - **Satélite HD (`satellite.day`):** Fotografía óptica satelital global de alta resolución en formato JPEG, vital en áreas de conflicto o zonas remotas sin cartografía vial reciente.
+       - **Calles Diurno (`explore.day`):** Toponimia completa y red urbana con sentidos de circulación para operaciones de evacuación y reconocimiento en ciudades.
+       - **Logística Táctica (`logistics.day`):** Red vial optimizada para el desplazamiento de convoyes pesados y transporte seguro.
+    3. **Arquitectura Multi-Capa sin Parpadeo (`buildHereMultiLayerStyle` / `setHereActiveLayer`):** Todas las capas raster base de HERE se pre-cargan en una única especificación de estilo MapLibre (`src/lib/geo/hereMapStyles.ts`). El cambio de capa conmuta la propiedad de visibilidad de MapLibre (`setLayoutProperty('visibility', 'visible'/'none')`) instantáneamente, preservando la orientación, el centro, el nivel de zoom, los polígonos de geofencing y los marcadores de viajeros sin recargar el canvas del mapa.
+    4. **Controles Tácticos C2:**  
+       - `NavigationControl`: Brújula militar rotatoria con indicador de rumbo y control de inclinación (pitch).
+       - `ScaleControl`: Escala métrica dinámica (metros / kilómetros) para estimación de distancias operativas.
+       - `FullscreenControl`: Despliegue para videowalls de salas de crisis y centros de control.
+    5. **HUD de Coordenadas y Telemetría en Vivo (`TacticalHud`):** Muestra en tiempo real la posición del cursor o centro táctico en formato militar WGS84 DMS (`DD°MM'SS.S"H`), grados decimales (`+DD.DDDDDD°, -DDD.DDDDDD°`), nivel de zoom (`Z: 12.50`), rumbo (`HDG: 000° N`) e inclinación, junto con botones de salto rápido operativo (*Quick Jump*: Centrar Rebaño, Zona Roja, Embajada Safe Haven).
+    6. **Alineación con Variables de Entorno:** Clave registrada en `NEXT_PUBLIC_HERE_API_KEY` con fallback automático al estilo de contingencia si no se define la clave.
+    7. **Suite de Pruebas:** Ampliada a 155 tests automatizados con verificación unitaria de capas, especificación de estilo MapLibre, conmutación en caliente y formateo de coordenadas en ambos hemisferios.
+
 ---
 
 ## 8. Estado de Implementación y Próximos Sprints
@@ -577,7 +594,19 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   Filtro `.vercelignore` aislando `/intercambio/`, `MEMORIA.md`, `scripts/`, `sql/` y `.github/`.
     *   Proyecto `gzn` creado en Vercel bajo el equipo `isskions-projects`, conectado a GitHub `Isskion/GZN`.
     *   Despliegue de producción activo y accesible en `https://gzn-coral.vercel.app` con HTTP 200 y validación de endpoints serverless.
-15. [ ] **Próximo Hito — Movilidad / Aplicación Móvil (Sprint 11):**
+15. [x] **Consola Web RSO — Módulo 2: Motor Cartográfico Profesional HERE Technologies + MapLibre GL (2026-09-15):**
+    *   Integración de HERE Technologies API v3 como proveedor cartográfico profesional táctico (Tier gratuito: 250K req/mes).
+    *   Catálogo de 4 capas tácticas HD (`explore.night`, `satellite.day`, `explore.day`, `logistics.day`) con conmutación en caliente sin recarga de mapa ni pérdida de estado.
+    *   Componente `TacticalLayerSelector` con interfaz táctica HUD y selector con badges visuales (`TAC-NIGHT`, `SAT-HD`, `STREETS`, `LOG-FLEET`).
+    *   Componente `TacticalHud` con telemetría en tiempo real: coordenadas WGS84 DMS y decimales, nivel de zoom, rumbo (`HDG`), inclinación (`PITCH`) y accesos directos de centrado táctico (*El Rebaño*, *Zona Roja*, *Safe Haven*).
+    *   Controles `NavigationControl` (brújula/pitch), `ScaleControl` (métrica) y `FullscreenControl` integrados.
+    *   Interacción táctica completa con vuelo (`flyTo`) y apertura de popups al pulsar sobre viajeros o zonas.
+    *   Variables de entorno documentadas en `.env.local` y `.env.local.example` (`NEXT_PUBLIC_HERE_API_KEY`).
+    *   Suite de pruebas automatizadas ampliada a 155 tests (`scripts/test-bloqueantes.ts`) con 100% de éxito y build Next.js verificado (1581ms).
+16. [ ] **Próximo Hito — Consola Web RSO: Conexión de Datos Reales y Autenticación Staff (Módulos 1, 3, 4 y 5):**
+    *   Sustitución de estados mock locales en `src/app/page.tsx` por llamadas a endpoints de backend (`GET /api/zones`, `GET /api/travelers`, `GET /api/alerts`).
+    *   Herramienta de dibujo interactivo de zonas tácticas (`POST /api/zones`) y triaje de alertas (`PATCH /api/alerts/[id]`).
+17. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
     *   Desarrollo de la aplicación móvil de campo (Flutter / React Native) conectada a la infraestructura backend y sus endpoints autenticados.
 
 ---
