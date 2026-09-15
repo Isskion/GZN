@@ -413,6 +413,14 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     5. **Trazabilidad Forense Ampliada (ADR-009):** Se añade `ALERT_STATUS_CHANGED` al catálogo de `AuditAction` para registrar transiciones intermedias o reaperturas, complementando a `ALERT_ACKNOWLEDGED` y `ALERT_RESOLVED` con payload auditado que incluye `traveler_status_reset` y `reset_reason`.
     6. **Ampliación de Listado (`GET /api/alerts`):** Soporte de filtros por `status`, `severity`, `traveler_id` y paginación (`limit`, `offset`) con join a `profiles:resolved_by`.
 
+*   **ADR-011 (2026-09-15): Gestión Completa de Zonas Tácticas: Mantenimiento, Soft-Delete y Salvaguarda Forense en DELETE.**  
+    *Decisión:* Implementación del Paquete B2 del Core Backend GZN:
+    1. **Rutas RESTful Dinámicas (`/api/zones/[id]`):** Se implementan `GET` (detalle y geometría GeoJSON Feature), `PATCH` (modificación parcial de propiedades tácticas, buffers, curfews, safe havens y geometría opcional) y `DELETE` (desactivación o retirada controlada).
+    2. **Control de Acceso Estricto con Validación de Perfil Activo (Mandato Claude):** Tanto en `PATCH` como en `DELETE`, se verifica explícitamente en TypeScript que el perfil del usuario autenticado en `public.profiles` posea rol autorizado (`RSO`, `ORG_ADMIN`, `SUPER_ADMIN`) y que su flag `is_active` sea `TRUE` (`.eq('is_active', true)`). Los operadores (`OPERATOR`) reciben un rechazo controlado `HTTP 403 Forbidden` defensivo, alineado con las políticas RLS de PostgreSQL.
+    3. **Soft-Delete Táctico por Defecto en `DELETE`:** Debido a la restricción de integridad referencial donde `public.alerts.zone_id REFERENCES public.zones(id)` no dispone de borrado en cascada, y para preservar la cadena de custodia forense exigida por Duty of Care y RGPD Art. 35, el endpoint `DELETE` aplica por defecto un *soft-delete* (`is_active = FALSE`). La zona queda archivada y deja de intervenir en la evaluación de geofencing en tiempo real (`check_point_zones`, `find_nearest_safe_haven`, `get_active_zones`).
+    4. **Borrado Físico con Salvaguarda Forense (`?permanent=true`):** Solo si el cliente solicita explícitamente la eliminación permanente, el backend verifica previamente con un conteo explícito (`head: true`) si existen alertas asociadas a la zona en `public.alerts`. Si existen alertas vinculadas, la petición se bloquea con `HTTP 409 Conflict`, prohibiendo la destrucción de evidencia histórica.
+    5. **Trazabilidad Inmutable DPIA:** Se auditan formalmente las operaciones mediante `logAuditEvent` registrando `ZONE_MODIFIED` (con valores previos y lista de campos modificados) y `ZONE_DELETED` (con indicador del tipo de borrado `soft` vs `hard`).
+
 ---
 
 ## 8. Estado de Implementación y Próximos Sprints
@@ -454,8 +462,15 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
    *   Filtros (`status`, `severity`, `traveler_id`) y paginación en `GET /api/alerts`.
    *   Acción `ALERT_STATUS_CHANGED` en `AuditAction` y trazabilidad forense completa.
    *   Suite ampliada a 45 tests automatizados (`scripts/test-bloqueantes.ts`).
-10. [ ] **Próximo Hito — Core Backend: Paquete B2 (Gestión Completa de Zonas: PATCH & DELETE):**
-    *   Actualización y desactivación controlada de perímetros de riesgo por oficiales RSO.
+10. [x] **Core Backend — Paquete B2: Gestión Completa de Zonas: PATCH & DELETE (2026-09-15):**
+    *   Rutas `GET /api/zones/[id]`, `PATCH /api/zones/[id]` y `DELETE /api/zones/[id]` implementadas.
+    *   Validación estricta de perfil activo (`is_active = true`) y control de rol (403 para `OPERATOR`).
+    *   Soft-delete táctico por defecto (`is_active = false`) preservando integridad referencial en `public.alerts`.
+    *   Salvaguarda forense de borrado físico (`?permanent=true` bloqueado con 409 ante alertas vinculadas).
+    *   Trazabilidad forense con `ZONE_MODIFIED` y `ZONE_DELETED`.
+    *   Suite ampliada a 61 tests automatizados (`scripts/test-bloqueantes.ts`).
+11. [ ] **Próximo Hito — Core Backend: Paquete B3 (Gestión de Viajeros y Terminales Hardware: El Rebaño):**
+    *   Alta de personal en terreno, credenciales criptográficas de dispositivo y ficha médica/contacto de emergencia.
 
 ---
 

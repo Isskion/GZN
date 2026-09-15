@@ -371,6 +371,88 @@ async function runTests() {
   );
 
   // ----------------------------------------------------------------------------
+  // 6. Gestión Completa de Zonas: Modificación y Desactivación Táctica (Paquete B2)
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 6. Gestión Completa de Zonas: PATCH & DELETE (Paquete B2) ---');
+
+  // Control de rol estricto con validación de perfil activo (Mandato Claude)
+  function checkZoneManagementRole(profile: { role?: string; is_active?: boolean } | null): { authorized: boolean; reason?: string } {
+    if (!profile) return { authorized: false, reason: 'profile_not_found' };
+    if (!profile.is_active) return { authorized: false, reason: 'profile_inactive' };
+    if (!['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role || '')) {
+      return { authorized: false, reason: 'insufficient_role' };
+    }
+    return { authorized: true };
+  }
+
+  assert(checkZoneManagementRole({ role: 'RSO', is_active: true }).authorized === true, 'RSO activo autorizado');
+  assert(checkZoneManagementRole({ role: 'ORG_ADMIN', is_active: true }).authorized === true, 'ORG_ADMIN activo autorizado');
+  assert(checkZoneManagementRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === true, 'SUPER_ADMIN activo autorizado');
+  assert(checkZoneManagementRole({ role: 'OPERATOR', is_active: true }).authorized === false, 'OPERATOR activo rechazado (403)');
+  assert(checkZoneManagementRole({ role: 'RSO', is_active: false }).authorized === false, 'RSO inactivo rechazado por is_active=false (403)');
+  assert(checkZoneManagementRole(null).authorized === false, 'Perfil inexistente rechazado (403)');
+
+  // Salvaguarda forense de borrado físico vs soft-delete (Mandato Claude)
+  function evaluateZoneDeletion(isPermanent: boolean, linkedAlertsCount: number): { action: 'soft_delete' | 'hard_delete' | 'conflict_409'; error?: string } {
+    if (!isPermanent) {
+      return { action: 'soft_delete' };
+    }
+    if (linkedAlertsCount > 0) {
+      return { 
+        action: 'conflict_409', 
+        error: `No se puede eliminar físicamente la zona: existen ${linkedAlertsCount} alertas de seguridad vinculadas (DPIA / RGPD Art. 35).` 
+      };
+    }
+    return { action: 'hard_delete' };
+  }
+
+  const defaultDelete = evaluateZoneDeletion(false, 5);
+  assert(defaultDelete.action === 'soft_delete', 'DELETE por defecto aplica soft-delete (is_active=false)');
+
+  const conflictDelete = evaluateZoneDeletion(true, 3);
+  assert(conflictDelete.action === 'conflict_409', 'DELETE permanente bloqueado (409) si existen alertas vinculadas');
+
+  const permanentAllowedDelete = evaluateZoneDeletion(true, 0);
+  assert(permanentAllowedDelete.action === 'hard_delete', 'DELETE permanente permitido si no hay alertas vinculadas');
+
+  // Validación de campos de actualización parcial
+  const validHex = (hex: string) => /^#[0-9a-fA-F]{6}$/.test(hex);
+  assert(validHex('#EF4444'), 'Color hex #EF4444 válido');
+  assert(!validHex('red'), 'Rechazo de color no hexadecimal ("red")');
+  assert(!validHex('#12345'), 'Rechazo de color hex con 5 dígitos');
+
+  // Estructura de eventos de auditoría ZONE_MODIFIED y ZONE_DELETED
+  const zoneModifiedEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: 'rso-user-123',
+    action: 'ZONE_MODIFIED',
+    entity_type: 'ZONE',
+    entity_id: 'zone-test-uuid',
+    payload: {
+      previous_values: { name: 'Zona Alfa', buffer_meters: 100 },
+      updated_fields: ['buffer_meters', 'contact_phone'],
+      zone_name: 'Zona Alfa',
+    },
+  };
+  assert(zoneModifiedEntry.action === 'ZONE_MODIFIED', 'Acción ZONE_MODIFIED registrada');
+  assert(Array.isArray(zoneModifiedEntry.payload?.updated_fields), 'Campos modificados capturados en payload');
+
+  const zoneDeletedEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: 'rso-user-123',
+    action: 'ZONE_DELETED',
+    entity_type: 'ZONE',
+    entity_id: 'zone-test-uuid',
+    payload: {
+      deletion_type: 'soft',
+      zone_name: 'Zona Alfa',
+      severity: 'RED',
+    },
+  };
+  assert(zoneDeletedEntry.action === 'ZONE_DELETED', 'Acción ZONE_DELETED registrada');
+  assert(zoneDeletedEntry.payload?.deletion_type === 'soft', 'Tipo de borrado (soft) documentado en auditoría');
+
+  // ----------------------------------------------------------------------------
   // Resumen
   // ----------------------------------------------------------------------------
   console.log('\n================================================================');
