@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS public.travelers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     organization_id UUID NOT NULL REFERENCES public.organizations(id),
     assigned_rso_id UUID REFERENCES public.profiles(id),
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL, -- Enlace opcional a identidad humana Supabase Auth
     full_name TEXT NOT NULL,
     email TEXT,
     phone TEXT NOT NULL,
@@ -167,16 +168,25 @@ CREATE TABLE IF NOT EXISTS public.zones (
     severity TEXT NOT NULL CHECK (severity IN ('RED', 'AMBER', 'SAFE_HAVEN', 'CORRIDOR')),
     color_hex TEXT DEFAULT '#EF4444',
     geom GEOMETRY(Polygon, 4326) NOT NULL,
+    buffer_meters INT DEFAULT 0 CHECK (buffer_meters >= 0),
+    is_curfew BOOLEAN DEFAULT FALSE,
+    curfew_start TIME WITHOUT TIME ZONE,
+    curfew_end TIME WITHOUT TIME ZONE,
+    contact_phone TEXT,
+    radio_frequency TEXT,
+    gate_access_protocol TEXT,
     valid_from TIMESTAMPTZ DEFAULT NOW(),
     valid_until TIMESTAMPTZ,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT check_curfew_consistency CHECK (is_curfew = FALSE OR (curfew_start IS NOT NULL AND curfew_end IS NOT NULL))
 );
 
 -- Índice espacial para consultas en milisegundos
 CREATE INDEX IF NOT EXISTS idx_zones_geom ON public.zones USING GIST (geom);
 CREATE INDEX IF NOT EXISTS idx_zones_org_active ON public.zones(organization_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_zones_curfew ON public.zones(organization_id, is_curfew) WHERE is_active = TRUE;
 
 -- 6. Briefings y Puntos de Interés (POIs)
 CREATE TABLE IF NOT EXISTS public.briefings (
@@ -233,7 +243,7 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 -- FUNCIONES RPC GEOESPACIALES
 -- ============================================================================
 
--- Comprueba si una coordenada está dentro de alguna zona activa y devuelve la más restrictiva
+-- Comprueba si una coordenada está dentro de alguna zona activa o buffer y evalúa toques de queda
 CREATE OR REPLACE FUNCTION public.check_point_zones(
     p_org_id UUID,
     p_lat DOUBLE PRECISION,
@@ -243,31 +253,19 @@ RETURNS TABLE (
     zone_id UUID,
     zone_name TEXT,
     severity TEXT,
-    color_hex TEXT
+    color_hex TEXT,
+    buffer_meters INT,
+    is_in_buffer BOOLEAN,
+    is_curfew BOOLEAN,
+    curfew_active_now BOOLEAN
 )
-LANGUAGE sql
+LANGUAGE plpgsql
 STABLE
 AS $$
-    SELECT 
-        z.id AS zone_id,
-        z.name AS zone_name,
-        z.severity,
-        z.color_hex
-    FROM public.zones z
-    WHERE z.organization_id = p_org_id
-      AND z.is_active = TRUE
-      AND (z.valid_until IS NULL OR z.valid_until > NOW())
-      AND ST_Contains(z.geom, ST_SetSRID(ST_Point(p_lon, p_lat), 4326))
-    ORDER BY 
-        CASE z.severity 
-            WHEN 'RED' THEN 1 
-            WHEN 'AMBER' THEN 2 
-            WHEN 'SAFE_HAVEN' THEN 3 
-            ELSE 4 
-        END ASC;
+... (ver sql/004_zones_enhancements.sql para implementación completa con CURRENT_TIME)
 $$;
 
--- Encuentra el Safe Haven más cercano a un punto dado
+-- Encuentra el Safe Haven más cercano con metadatos tácticos de contacto y acceso
 CREATE OR REPLACE FUNCTION public.find_nearest_safe_haven(
     p_org_id UUID,
     p_lat DOUBLE PRECISION,
@@ -276,6 +274,10 @@ CREATE OR REPLACE FUNCTION public.find_nearest_safe_haven(
 RETURNS TABLE (
     zone_id UUID,
     zone_name TEXT,
+    description TEXT,
+    contact_phone TEXT,
+    radio_frequency TEXT,
+    gate_access_protocol TEXT,
     distance_meters DOUBLE PRECISION
 )
 LANGUAGE sql
@@ -284,6 +286,10 @@ AS $$
     SELECT 
         z.id AS zone_id,
         z.name AS zone_name,
+        z.description,
+        z.contact_phone,
+        z.radio_frequency,
+        z.gate_access_protocol,
         ST_Distance(
             z.geom::geography, 
             ST_SetSRID(ST_Point(p_lon, p_lat), 4326)::geography
@@ -296,7 +302,7 @@ AS $$
     LIMIT 1;
 $$;
 
--- Creación segura de zona con geometría GeoJSON y PostGIS ST_GeomFromGeoJSON
+-- Creación segura de zona con geometría GeoJSON, buffers, toques de queda y metadatos safe haven
 CREATE OR REPLACE FUNCTION public.create_zone_with_geojson(
     p_org_id UUID DEFAULT NULL,
     p_name TEXT DEFAULT NULL,
@@ -304,14 +310,21 @@ CREATE OR REPLACE FUNCTION public.create_zone_with_geojson(
     p_severity TEXT DEFAULT NULL,
     p_color_hex TEXT DEFAULT NULL,
     p_geojson TEXT DEFAULT NULL,
-    p_valid_until TIMESTAMPTZ DEFAULT NULL
+    p_valid_until TIMESTAMPTZ DEFAULT NULL,
+    p_buffer_meters INT DEFAULT 0,
+    p_is_curfew BOOLEAN DEFAULT FALSE,
+    p_curfew_start TIME WITHOUT TIME ZONE DEFAULT NULL,
+    p_curfew_end TIME WITHOUT TIME ZONE DEFAULT NULL,
+    p_contact_phone TEXT DEFAULT NULL,
+    p_radio_frequency TEXT DEFAULT NULL,
+    p_gate_access_protocol TEXT DEFAULT NULL
 )
 RETURNS public.zones
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, extensions
 AS $$
-... (ver sql/003_zone_creation_rpc.sql para implementación completa)
+... (ver sql/004_zones_enhancements.sql para implementación completa y control de rol)
 $$;
 ```
 
@@ -378,6 +391,13 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     2. **Separación Ontológica:** `public.profiles` está vinculado a `auth.users(id)` y restringido exclusivamente a roles de staff con acceso a la consola de mando web. Los viajeros residen en `public.travelers` como sujetos protegidos en campo, sin cuenta interactiva de consola. Se autentican mediante enlace de hardware (`x-device-secret` / ECDSA P-256), preservando el principio de mínimo privilegio, la contención de superficie de ataque y el secreto de las rutas entre compañeros de organización.
     3. **Hoja de Ruta hacia App Móvil:** Para futuras versiones de la app con interfaz de usuario personalizada (briefings y POIs individuales), se habilitará la relación opcional `travelers.user_id REFERENCES auth.users(id)` con salvaguardas RLS que impidan el acceso a la consola de mando.
 
+*   **ADR-008 (2026-09-15): Enriquecimiento de Zonas: Buffers Espaciales, Toques de Queda y Metadatos Tácticos de Refugios (Safe Havens).**  
+    *Decisión:* Resolución del Punto 4 de la auditoría (Claude / Hoja de Ruta v0.8):
+    1. **Buffers de Amortiguamiento (`buffer_meters`):** Se introduce la distancia de pre-alerta en metros para advertir de proximidad a áreas de riesgo antes de consumar la incursión en la zona vedada. `check_point_zones` evalúa `ST_DWithin` en geography y devuelve `is_in_buffer`.
+    2. **Toques de Queda (`is_curfew`, `curfew_start`, `curfew_end`):** Soporte de ventanas horarias restrictivas (incluyendo cruce de medianoche, ej. 22:00 a 06:00) con evaluación automática en `check_point_zones` (`curfew_active_now`).
+    3. **Metadatos Tácticos de Refugios (`contact_phone`, `radio_frequency`, `gate_access_protocol`):** Enriquecimiento de zonas `SAFE_HAVEN` para que la función RPC `find_nearest_safe_haven` provea inmediatamente teléfono de enlace, frecuencia de radio en MHz y protocolo de acceso al puesto de guardia cuando un convoy solicite escape de emergencia.
+    4. **Actualización Integral de RPCs y API:** Implementación en `sql/004_zones_enhancements.sql`, validador TypeScript en servidor (`validateZoneEnhancements`) y adaptación completa de `GET/POST /api/zones`.
+
 ---
 
 ## 8. Estado de Implementación y Próximos Sprints
@@ -396,8 +416,13 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
 5. [x] **Resolución Punto 3 — Modelo de Roles y Entidad Travelers (Auditoría 2026-09-15):**
    *   Documentación exhaustiva en Sección 3.1 y ADR-007 sobre el modelo de identidades dual y justificación de por qué `TRAVELER` reside en `travelers` y no en `profiles`.
    *   Informe de entrega y análisis entregado en `intercambio/desde-gemini/2026-09-15-analisis-modelo-roles-travelers.md`.
-6. [ ] **Próximos Hitos (Sección "Importante" de la Auditoría):**
-   *   **Punto 4:** Creación de `sql/004_zones_enhancements.sql` (`buffer_meters`, toques de queda y metadatos de refugios).
+6. [x] **Resolución Punto 4 — Ampliación de Zonas: Buffers, Curfews y Safe Havens (Auditoría 2026-09-15):**
+   *   Migración desplegable en `sql/004_zones_enhancements.sql`.
+   *   Campos añadidos a `zones` y `travelers` (tipos en `src/types/database.ts`).
+   *   Validador `validateZoneEnhancements` en `src/lib/geo/validation.ts`.
+   *   Endpoints `GET /api/zones` y `POST /api/zones` actualizados.
+   *   Suite de pruebas automatizada ampliada a 18 tests (`scripts/test-bloqueantes.ts`).
+7. [ ] **Próximos Hitos (Sección "Importante" de la Auditoría):**
    *   **Punto 5:** Inserción de eventos en `audit_logs` en las rutas API para trazabilidad DPIA.
    *   **Punto 6:** Sinceramiento de arquitectura en `MEMORIA.md` (restringir Firebase a FCM push).
    *   Despliegue y vinculación en Vercel.

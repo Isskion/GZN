@@ -2,7 +2,7 @@
 // GZN — SUITE DE VALIDACIÓN AUTOMATIZADA: BLOQUEANTES 1 Y 2
 // ==============================================================================
 
-import { validateGeoJSONPolygon } from '../src/lib/geo/validation';
+import { validateGeoJSONPolygon, validateZoneEnhancements } from '../src/lib/geo/validation';
 import { hashDeviceSecret } from '../src/lib/auth/device';
 import crypto from 'crypto';
 
@@ -134,6 +134,67 @@ async function runTests() {
   // Comprobación criptográfica: Hashes de secretos distintos no coinciden
   const crossSecretMatch = crypto.timingSafeEqual(Buffer.from(hashOrgA), Buffer.from(hashOrgB));
   assert(crossSecretMatch === false, 'Hashes de secretos distintos no coinciden (timingSafeEqual)');
+
+  // ----------------------------------------------------------------------------
+  // 3. Pruebas de Parámetros Tácticos Enriquecidos (Punto 4: Buffers, Curfews, Safe Havens)
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 3. Parámetros Tácticos Enriquecidos (Punto 4: Buffers y Curfews) ---');
+
+  // Buffer válido
+  assert(validateZoneEnhancements({ buffer_meters: 500 }).valid === true, 'Buffer positivo (500m) aceptado');
+  assert(validateZoneEnhancements({ buffer_meters: 0 }).valid === true, 'Buffer cero (0m) aceptado');
+
+  // Buffer negativo rechazado
+  const negBufferResult = validateZoneEnhancements({ buffer_meters: -50 });
+  assert(
+    negBufferResult.valid === false && negBufferResult.error?.includes('mayor o igual a 0') === true,
+    'Rechazo controlado de buffer negativo (-50m)'
+  );
+
+  // Toque de queda coherente
+  const validCurfew = validateZoneEnhancements({
+    is_curfew: true,
+    curfew_start: '22:00',
+    curfew_end: '06:00',
+  });
+  assert(validCurfew.valid === true, 'Toque de queda válido (22:00 - 06:00) aceptado');
+
+  // Toque de queda con segundos
+  const validCurfewSec = validateZoneEnhancements({
+    is_curfew: true,
+    curfew_start: '20:30:00',
+    curfew_end: '05:45:00',
+  });
+  assert(validCurfewSec.valid === true, 'Toque de queda con segundos (20:30:00 - 05:45:00) aceptado');
+
+  // Toque de queda sin hora fin rechazado
+  const missingEndCurfew = validateZoneEnhancements({
+    is_curfew: true,
+    curfew_start: '22:00',
+  });
+  assert(
+    missingEndCurfew.valid === false && missingEndCurfew.error?.includes('curfew_start y curfew_end') === true,
+    'Rechazo de toque de queda sin hora de fin'
+  );
+
+  // Toque de queda con formato de hora corrupto
+  const corruptTimeCurfew = validateZoneEnhancements({
+    is_curfew: true,
+    curfew_start: '25:99',
+    curfew_end: '06:00',
+  });
+  assert(
+    corruptTimeCurfew.valid === false && corruptTimeCurfew.error?.includes('inválido') === true,
+    'Rechazo de formato de hora corrupto (25:99)'
+  );
+
+  // Metadatos Safe Haven aceptados
+  const safeHavenMeta = validateZoneEnhancements({
+    contact_phone: '+34 600 000 000',
+    radio_frequency: '156.800 MHz (Canal 16)',
+    gate_access_protocol: 'Santo y seña Bravo-Delta en puesto de guardia',
+  });
+  assert(safeHavenMeta.valid === true, 'Metadatos tácticos de Safe Haven aceptados');
 
   // ----------------------------------------------------------------------------
   // Resumen

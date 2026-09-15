@@ -30,6 +30,7 @@ export interface Traveler {
   id: string;
   organization_id: string;
   assigned_rso_id?: string | null;
+  user_id?: string | null;
   full_name: string;
   email?: string | null;
   phone: string;
@@ -39,6 +40,7 @@ export interface Traveler {
   last_longitude?: number | null;
   last_ping_at?: string | null;
   battery_level?: number | null;
+  device_secret_hash?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +54,13 @@ export interface Zone {
   severity: ZoneSeverity;
   color_hex: string;
   geom: GeoJSON.Polygon;
+  buffer_meters: number;
+  is_curfew: boolean;
+  curfew_start?: string | null;
+  curfew_end?: string | null;
+  contact_phone?: string | null;
+  radio_frequency?: string | null;
+  gate_access_protocol?: string | null;
   valid_from: string;
   valid_until?: string | null;
   is_active: boolean;

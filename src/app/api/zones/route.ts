@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedSession } from '@/lib/auth/session';
-import { validateGeoJSONPolygon } from '@/lib/geo/validation';
+import { validateGeoJSONPolygon, validateZoneEnhancements } from '@/lib/geo/validation';
 
 // GET /api/zones — Obtener zonas activas de la organización del usuario
 export async function GET(request: NextRequest) {
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     // Consulta con cliente de sesión: RLS filtra automáticamente por la organización del usuario
     const { data: zones, error } = await supabase
       .from('zones')
-      .select('id, organization_id, name, description, severity, color_hex, valid_from, valid_until, is_active, created_at, geom')
+      .select('id, organization_id, name, description, severity, color_hex, buffer_meters, is_curfew, curfew_start, curfew_end, contact_phone, radio_frequency, gate_access_protocol, valid_from, valid_until, is_active, created_at, geom')
       .eq('is_active', true);
 
     if (error) {
@@ -52,6 +52,13 @@ export async function GET(request: NextRequest) {
             description: zone.description,
             severity: zone.severity,
             color: zone.color_hex,
+            buffer_meters: zone.buffer_meters ?? 0,
+            is_curfew: zone.is_curfew ?? false,
+            curfew_start: zone.curfew_start ?? null,
+            curfew_end: zone.curfew_end ?? null,
+            contact_phone: zone.contact_phone ?? null,
+            radio_frequency: zone.radio_frequency ?? null,
+            gate_access_protocol: zone.gate_access_protocol ?? null,
             valid_until: zone.valid_until,
           },
         };
@@ -90,6 +97,13 @@ export async function POST(request: NextRequest) {
       color_hex,
       geojson_geometry,
       valid_until,
+      buffer_meters,
+      is_curfew,
+      curfew_start,
+      curfew_end,
+      contact_phone,
+      radio_frequency,
+      gate_access_protocol,
     } = body;
 
     // Validación de campos obligatorios
@@ -121,6 +135,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validación de parámetros tácticos adicionales (buffer, curfew, safe haven)
+    const enhancementsValidation = validateZoneEnhancements({
+      buffer_meters,
+      is_curfew,
+      curfew_start,
+      curfew_end,
+      contact_phone,
+      radio_frequency,
+      gate_access_protocol,
+    });
+
+    if (!enhancementsValidation.valid) {
+      return NextResponse.json(
+        { error: `Parámetros tácticos de zona inválidos: ${enhancementsValidation.error}` },
+        { status: 400 }
+      );
+    }
+
     const geometryString = JSON.stringify(
       geojson_geometry.type === 'Feature' ? geojson_geometry.geometry : geojson_geometry
     );
@@ -133,6 +165,13 @@ export async function POST(request: NextRequest) {
       p_color_hex: color_hex || null,
       p_geojson: geometryString,
       p_valid_until: valid_until || null,
+      p_buffer_meters: buffer_meters !== undefined ? buffer_meters : 0,
+      p_is_curfew: is_curfew !== undefined ? is_curfew : false,
+      p_curfew_start: curfew_start || null,
+      p_curfew_end: curfew_end || null,
+      p_contact_phone: contact_phone ? String(contact_phone).trim() : null,
+      p_radio_frequency: radio_frequency ? String(radio_frequency).trim() : null,
+      p_gate_access_protocol: gate_access_protocol ? String(gate_access_protocol).trim() : null,
     });
 
     if (error) {

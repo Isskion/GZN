@@ -115,3 +115,57 @@ export function validateGeoJSONPolygon(geojson: any): GeoValidationResult {
 
   return { valid: true };
 }
+
+export interface ZoneEnhancementsInput {
+  buffer_meters?: number | null;
+  is_curfew?: boolean | null;
+  curfew_start?: string | null;
+  curfew_end?: string | null;
+  contact_phone?: string | null;
+  radio_frequency?: string | null;
+  gate_access_protocol?: string | null;
+}
+
+const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d))?$/;
+
+/**
+ * Valida los parámetros tácticos enriquecidos de una zona:
+ * - buffer_meters: entero >= 0
+ * - is_curfew / curfew_start / curfew_end: coherencia horaria y formato HH:MM o HH:MM:SS
+ */
+export function validateZoneEnhancements(input: ZoneEnhancementsInput): GeoValidationResult {
+  if (input.buffer_meters !== undefined && input.buffer_meters !== null) {
+    if (typeof input.buffer_meters !== 'number' || isNaN(input.buffer_meters) || input.buffer_meters < 0) {
+      return {
+        valid: false,
+        error: 'El campo buffer_meters debe ser un número entero mayor o igual a 0.',
+      };
+    }
+  }
+
+  if (input.is_curfew) {
+    if (!input.curfew_start || !input.curfew_end) {
+      return {
+        valid: false,
+        error: 'Para zonas con toque de queda activo (is_curfew=true), es obligatorio especificar curfew_start y curfew_end.',
+      };
+    }
+
+    if (!TIME_REGEX.test(input.curfew_start.trim())) {
+      return {
+        valid: false,
+        error: `Formato de hora inválido en curfew_start: '${input.curfew_start}'. Debe ser HH:MM o HH:MM:SS (24h).`,
+      };
+    }
+
+    if (!TIME_REGEX.test(input.curfew_end.trim())) {
+      return {
+        valid: false,
+        error: `Formato de hora inválido en curfew_end: '${input.curfew_end}'. Debe ser HH:MM o HH:MM:SS (24h).`,
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
