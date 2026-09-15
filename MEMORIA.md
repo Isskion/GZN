@@ -471,6 +471,19 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     5. **Salvaguarda Forense contra CASCADE en Borrado:** Debido a que `public.alerts.traveler_id` tiene `ON DELETE CASCADE`, el endpoint `DELETE` aplica por defecto una baja táctica (`status = 'INCOMMUNICADO'`, revocación de secreto con `device_secret_hash = NULL`). El borrado físico (`?permanent=true`) se bloquea con `HTTP 409 Conflict` si existen alertas históricas vinculadas, protegiendo la cadena de custodia pericial (DPIA / RGPD Art. 35).
     6. **Sincronización RLS y Control RBAC (Migración 005):** Creación de `sql/005_travelers_rls_policies.sql` para sustituir la política permisiva de `UPDATE` por una restringida a `RSO` y Administradores, y añadir la política `FOR DELETE`. En la API se verifica perfil activo (`is_active = true`), rechazando con `HTTP 403 Forbidden` a `OPERATOR`.
 
+*   **ADR-013 (2026-09-15): Servicios Geoespaciales RPC Tácticos: Safe Haven, Geofencing Stateless y Vigencia Temporal PostGIS.**  
+    *Decisión:* Implementación del Paquete B4 del Core Backend GZN:
+    1. **Exposición de Endpoints RESTful (`/api/geo/safe-haven` y `/api/geo/check-point`):**
+       * `GET /api/geo/safe-haven`: Localiza el refugio seguro (`SAFE_HAVEN`) activo más cercano calculando la distancia geodésica WGS84 sobre el elipsoide PostGIS, devolviendo indicativo de radio, teléfono de contacto, protocolo de acceso a garita y distancia en metros/km.
+       * `POST /api/geo/check-point`: Servicio analítico puro y sin estado (*stateless*). Evalúa de forma ultrarrápida si una coordenada intersecta zonas rojas, penetra buffers perimetrales de advertencia o vulnera toques de queda activos (`curfew_active_now`), sin modificar tablas, sin mutar estados de viajero y sin disparar alarmas ni notificaciones push (diseñado para *Mission Planning*, navegación interactiva en la consola web e inspección preventiva de rutas).
+    2. **Autenticación Dual y Aislamiento Multi-Tenant:**
+       * Ambos endpoints admiten tanto sesión web de Staff (`OPERATOR`, `RSO`, `ORG_ADMIN`, `SUPER_ADMIN` con `is_active = true`) mediante cliente de sesión Supabase (RLS), como terminales móviles de hardware mediante cabecera `x-device-secret` + `traveler_id` (mediante cliente admin `service_role` con organización validada criptográficamente).
+       * El `organization_id` **nunca** se acepta del cliente; se deriva invariablemente de la identidad autenticada.
+    3. **Resolución Flexible de Coordenadas:** Soporta coordenadas explícitas (`latitude`/`longitude` o `lat`/`lon`) o resolución automática a partir de la última posición registrada de un `traveler_id`.
+    4. **Vigencia Temporal en Safe Haven (Migración 006):** Redacción de `sql/006_geo_rpc_enhancements.sql` para incorporar el filtro `AND (z.valid_until IS NULL OR z.valid_until > NOW())` en `public.find_nearest_safe_haven`, impidiendo que un refugio temporal ya caducado sea asignado a personal en peligro.
+    5. **Alineación de Tipado y Rendimiento DPIA:** Incorporación de `'CORRIDOR'` en la unión de severidades de `highest_severity`. Al ser consultas analíticas de lectura de alta frecuencia, no saturan `public.audit_logs`.
+    6. **Testing Automatizado:** Incorporación de la Sección 8 en `scripts/test-bloqueantes.ts` alcanzando **107/107 pruebas exitosas**.
+
 ---
 
 ## 8. Estado de Implementación y Próximos Sprints
@@ -527,8 +540,15 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   Salvaguarda forense en DELETE frente al `ON DELETE CASCADE` de `alerts` (baja táctica por defecto, 409 ante alertas vinculadas).
     *   Migración `sql/005_travelers_rls_policies.sql` para alinear RLS de UPDATE/DELETE con RBAC.
     *   Suite ampliada a 80 tests automatizados (`scripts/test-bloqueantes.ts`).
-12. [ ] **Próximo Hito — Core Backend: Paquete B4 (Servicios Geoespaciales RPC Tácticos):**
-    *   Exposición de endpoints RPC PostGIS: `GET /api/geo/safe-haven` y `POST /api/geo/check-point`.
+12. [x] **Core Backend — Paquete B4: Servicios Geoespaciales RPC Tácticos (2026-09-15):**
+    *   Rutas `GET /api/geo/safe-haven` y `POST /api/geo/check-point` (con soporte GET auxiliar) implementadas.
+    *   Autenticación dual: Sesión Staff (`OPERATOR`/`RSO`/`ADMIN`) con cliente RLS y Terminales Hardware con cliente Admin (`service_role`).
+    *   Aislamiento multi-tenant estricto: `organization_id` derivado invariablemente de la identidad autenticada.
+    *   Migración `sql/006_geo_rpc_enhancements.sql` para vigencia temporal `(valid_until IS NULL OR valid_until > NOW())` en `find_nearest_safe_haven`.
+    *   Evaluación analítica y puramente sin estado (*stateless*) en `check-point` con síntesis de `highest_severity` (incluyendo `CORRIDOR`).
+    *   Suite ampliada a 107 tests automatizados (`scripts/test-bloqueantes.ts`).
+13. [ ] **Próximo Hito — Core Backend: Paquete B5 (Cierre Final de Backend / Verificación Integral Pre-Movilidad):**
+    *   Auditoría de endpoints completados, sincronización de migraciones en Supabase y preparación para el frontend de movilidad.
 
 ---
 

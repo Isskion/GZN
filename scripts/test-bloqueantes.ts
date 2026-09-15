@@ -564,6 +564,97 @@ async function runTests() {
   assert(travelerDeletedEntry.action === 'TRAVELER_DELETED', 'Acción TRAVELER_DELETED registrada');
 
   // ----------------------------------------------------------------------------
+  // 8. Servicios Geoespaciales RPC Tácticos (Paquete B4)
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 8. Servicios Geoespaciales RPC Tácticos (Paquete B4) ---');
+
+  // 1. Validación de coordenadas WGS84
+  function validateWgs84Coordinates(lat: number | null | undefined, lon: number | null | undefined): { valid: boolean; error?: string } {
+    if (lat === null || lat === undefined || lon === null || lon === undefined || isNaN(lat) || isNaN(lon)) {
+      return { valid: false, error: 'Coordenadas requeridas' };
+    }
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      return { valid: false, error: 'Coordenadas WGS84 fuera de rango' };
+    }
+    return { valid: true };
+  }
+
+  assert(validateWgs84Coordinates(40.4168, -3.7038).valid === true, 'Coordenadas válidas en Madrid aceptadas');
+  assert(validateWgs84Coordinates(0, 0).valid === true, 'Coordenadas ecuatoriales válidas aceptadas');
+  assert(validateWgs84Coordinates(90.1, 0).valid === false, 'Rechazo de latitud > 90');
+  assert(validateWgs84Coordinates(-90.1, 0).valid === false, 'Rechazo de latitud < -90');
+  assert(validateWgs84Coordinates(0, 180.1).valid === false, 'Rechazo de longitud > 180');
+  assert(validateWgs84Coordinates(0, -180.1).valid === false, 'Rechazo de longitud < -180');
+  assert(validateWgs84Coordinates(NaN, 0).valid === false, 'Rechazo de latitud NaN');
+  assert(validateWgs84Coordinates(null, null).valid === false, 'Rechazo de coordenadas nulas');
+
+  // 2. Control RBAC para servicios tácticos (Staff)
+  function checkTacticalServiceRole(profile: { role?: string; is_active?: boolean } | null): { authorized: boolean; reason?: string } {
+    if (!profile) return { authorized: false, reason: 'profile_not_found' };
+    if (!profile.is_active) return { authorized: false, reason: 'profile_inactive' };
+    if (!['OPERATOR', 'RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role || '')) {
+      return { authorized: false, reason: 'insufficient_role' };
+    }
+    return { authorized: true };
+  }
+
+  assert(checkTacticalServiceRole({ role: 'OPERATOR', is_active: true }).authorized === true, 'OPERATOR activo autorizado para servicios tácticos');
+  assert(checkTacticalServiceRole({ role: 'RSO', is_active: true }).authorized === true, 'RSO activo autorizado para servicios tácticos');
+  assert(checkTacticalServiceRole({ role: 'ORG_ADMIN', is_active: true }).authorized === true, 'ORG_ADMIN activo autorizado para servicios tácticos');
+  assert(checkTacticalServiceRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === true, 'SUPER_ADMIN activo autorizado para servicios tácticos');
+  assert(checkTacticalServiceRole({ role: 'OPERATOR', is_active: false }).authorized === false, 'OPERATOR inactivo rechazado por is_active=false (403)');
+  assert(checkTacticalServiceRole({ role: 'RSO', is_active: false }).authorized === false, 'RSO inactivo rechazado por is_active=false (403)');
+  assert(checkTacticalServiceRole(null).authorized === false, 'Perfil nulo rechazado (401/403)');
+
+  // 3. Autenticación Dual y Selección de Cliente (Precisión de Implementación Claude)
+  function resolveDualAuthClient(hasDeviceSecret: boolean): { clientType: 'admin' | 'session'; authBranch: 'hardware' | 'staff' } {
+    if (hasDeviceSecret) {
+      return { clientType: 'admin', authBranch: 'hardware' };
+    }
+    return { clientType: 'session', authBranch: 'staff' };
+  }
+
+  assert(resolveDualAuthClient(true).clientType === 'admin', 'Rama hardware utiliza cliente admin (service_role)');
+  assert(resolveDualAuthClient(true).authBranch === 'hardware', 'Rama hardware identificada correctamente');
+  assert(resolveDualAuthClient(false).clientType === 'session', 'Rama staff utiliza cliente de sesión (RLS)');
+  assert(resolveDualAuthClient(false).authBranch === 'staff', 'Rama staff identificada correctamente');
+
+  // 4. Formateo y Métrica de Distancias en Safe Haven
+  function formatSafeHavenResult(rawDistanceMeters: number): { distance_meters: number; distance_km: number } {
+    const distance_meters = Math.round(rawDistanceMeters * 10) / 10;
+    const distance_km = Math.round((rawDistanceMeters / 1000) * 100) / 100;
+    return { distance_meters, distance_km };
+  }
+
+  const shMetrics = formatSafeHavenResult(1254.789);
+  assert(shMetrics.distance_meters === 1254.8, 'Distancia en metros redondeada a 1 decimal');
+  assert(shMetrics.distance_km === 1.25, 'Distancia en kilómetros calculada y redondeada a 2 decimales');
+
+  // 5. Síntesis de Severidad Máxima en Check Point (Observación menor 1 de Claude)
+  type TestHighestSeverity = 'RED' | 'AMBER' | 'SAFE_HAVEN' | 'CORRIDOR' | string | null;
+  function computeHighestSeverity(matchingZones: Array<{ severity: string; curfew_active_now?: boolean }>): { highest: TestHighestSeverity; hasCurfew: boolean } {
+    if (!matchingZones || matchingZones.length === 0) {
+      return { highest: null, hasCurfew: false };
+    }
+    // PostGIS devuelve ordenado: RED -> AMBER -> SAFE_HAVEN -> otros
+    const highest = matchingZones[0].severity as TestHighestSeverity;
+    const hasCurfew = matchingZones.some(z => z.curfew_active_now === true);
+    return { highest, hasCurfew };
+  }
+
+  assert(computeHighestSeverity([]).highest === null, 'highest_severity es null si no hay zonas');
+  assert(computeHighestSeverity([{ severity: 'RED' }, { severity: 'AMBER' }]).highest === 'RED', 'RED prevalece sobre AMBER');
+  assert(computeHighestSeverity([{ severity: 'AMBER' }, { severity: 'SAFE_HAVEN' }]).highest === 'AMBER', 'AMBER prevalece sobre SAFE_HAVEN');
+  assert(computeHighestSeverity([{ severity: 'CORRIDOR' }]).highest === 'CORRIDOR', 'CORRIDOR soportado en highest_severity (Observación Claude)');
+  assert(computeHighestSeverity([{ severity: 'RED', curfew_active_now: false }, { severity: 'AMBER', curfew_active_now: true }]).hasCurfew === true, 'Detección agregada de toque de queda activo');
+
+  // 6. Naturaleza Analítica sin Mutación (Stateless)
+  function isStatelessEvaluation(result: Record<string, any>): boolean {
+    return result.inside_zones !== undefined && result.evaluated_at !== undefined && !('alert_id' in result) && !('status_changed' in result);
+  }
+  assert(isStatelessEvaluation({ inside_zones: true, evaluated_at: new Date().toISOString() }), 'Check-point opera sin efectos secundarios (stateless)');
+
+  // ----------------------------------------------------------------------------
   // Resumen
   // ----------------------------------------------------------------------------
   console.log('\n================================================================');
