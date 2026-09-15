@@ -182,6 +182,10 @@ END;
 $$;
 
 -- 4. Actualización de get_active_zones con los nuevos atributos tácticos
+-- DROP defensivo por el mismo motivo (cambia el tipo de fila devuelto respecto a la
+-- versión de 003_zone_creation_rpc.sql); IF EXISTS lo hace inofensivo si esta versión
+-- de 004 es la primera vez que la función se crea en este entorno.
+DROP FUNCTION IF EXISTS public.get_active_zones();
 CREATE OR REPLACE FUNCTION public.get_active_zones()
 RETURNS TABLE (
     id UUID,
@@ -233,6 +237,11 @@ AS $$
 $$;
 
 -- 5. Actualización de find_nearest_safe_haven con metadatos tácticos de contacto y acceso
+-- DROP obligatorio: PostgreSQL no permite CREATE OR REPLACE cuando cambia el tipo de fila
+-- devuelto (columnas OUT). La firma original (001_initial_schema_postgis.sql) solo
+-- devolvía zone_id/zone_name/distance_meters; esta versión añade description/contact_phone/
+-- radio_frequency/gate_access_protocol, así que hay que eliminar la función vieja primero.
+DROP FUNCTION IF EXISTS public.find_nearest_safe_haven(UUID, DOUBLE PRECISION, DOUBLE PRECISION);
 CREATE OR REPLACE FUNCTION public.find_nearest_safe_haven(
     p_org_id UUID,
     p_lat DOUBLE PRECISION,
@@ -270,6 +279,10 @@ AS $$
 $$;
 
 -- 6. Actualización de check_point_zones para evaluar toques de queda y buffers espaciales
+-- DROP obligatorio por el mismo motivo que find_nearest_safe_haven arriba: la firma
+-- original (001_initial_schema_postgis.sql) solo devolvía zone_id/zone_name/severity/
+-- color_hex; esta versión añade buffer_meters/is_in_buffer/is_curfew/curfew_active_now.
+DROP FUNCTION IF EXISTS public.check_point_zones(UUID, DOUBLE PRECISION, DOUBLE PRECISION);
 CREATE OR REPLACE FUNCTION public.check_point_zones(
     p_org_id UUID,
     p_lat DOUBLE PRECISION,
