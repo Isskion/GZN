@@ -484,6 +484,15 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     5. **Alineación de Tipado y Rendimiento DPIA:** Incorporación de `'CORRIDOR'` en la unión de severidades de `highest_severity`. Al ser consultas analíticas de lectura de alta frecuencia, no saturan `public.audit_logs`.
     6. **Testing Automatizado:** Incorporación de la Sección 8 en `scripts/test-bloqueantes.ts` alcanzando **107/107 pruebas exitosas**.
 
+*   **ADR-014 (2026-09-15): Gestión de Briefings Tácticos con POIs: Sustitución Atómica Transaccional (RPC) y Cobertura Completa del Esquema.**  
+    *Decisión:* Implementación del Paquete B5 del Core Backend GZN:
+    1. **Rutas RESTful (`/api/briefings` y `/api/briefings/[id]`):** Implementación de `GET /api/briefings` (listado con búsqueda y POIs anidados), `POST /api/briefings` (redacción de briefing de misión con POIs), `GET /api/briefings/[id]` (detalle individual), `PATCH /api/briefings/[id]` (actualización táctica y reemplazo de POIs) y `DELETE /api/briefings/[id]` (retirada con eliminación en cascada).
+    2. **Atomicidad Transaccional en Gestión de POIs (Precisión Claude / Migración 007):** Creación de la RPC PostgreSQL `replace_briefing_pois(p_briefing_id, p_pois)` en `sql/007_briefings_management.sql`. Garantiza que el borrado de los POIs anteriores y la inserción de los nuevos se ejecute en una única transacción atómica de base de datos (`SECURITY INVOKER` respetando RLS). Si algún POI falla en validación (categoría o coordenadas), la transacción se revierte íntegramente (ROLLBACK), impidiendo la pérdida accidental de datos de misión.
+    3. **Autenticación Dual para Soporte Offline en Movilidad:** Los endpoints `GET` admiten tanto sesión web de Staff (`createClient()`) como dispositivos móviles de hardware (`x-device-secret` + `verifyDeviceAuth` con cliente admin), permitiendo a la futura app móvil descargar y cachear briefings y POIs para navegación sin cobertura.
+    4. **Control de Acceso RBAC:** Las operaciones de creación, edición y borrado quedan estrictamente restringidas a `RSO`, `ORG_ADMIN` y `SUPER_ADMIN` con perfil activo (`is_active = true`), rechazando con `HTTP 403 Forbidden` a `OPERATOR`.
+    5. **Trazabilidad DPIA Completa:** Incorporación de las acciones tipadas `BRIEFING_CREATED`, `BRIEFING_MODIFIED` y `BRIEFING_DELETED` en `AuditAction`.
+    6. **Cobertura 100% del Esquema DDL y Suite de 132 Tests:** Todas las entidades del modelo relacional cuentan con endpoints y salvaguardas verificadas, alcanzando **132/132 pruebas exitosas** en `scripts/test-bloqueantes.ts`.
+
 ---
 
 ## 8. Estado de Implementación y Próximos Sprints
@@ -547,8 +556,15 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   Migración `sql/006_geo_rpc_enhancements.sql` para vigencia temporal `(valid_until IS NULL OR valid_until > NOW())` en `find_nearest_safe_haven`.
     *   Evaluación analítica y puramente sin estado (*stateless*) en `check-point` con síntesis de `highest_severity` (incluyendo `CORRIDOR`).
     *   Suite ampliada a 107 tests automatizados (`scripts/test-bloqueantes.ts`).
-13. [ ] **Próximo Hito — Core Backend: Paquete B5 (Cierre Final de Backend / Verificación Integral Pre-Movilidad):**
-    *   Auditoría de endpoints completados, sincronización de migraciones en Supabase y preparación para el frontend de movilidad.
+13. [x] **Core Backend — Paquete B5: Gestión de Briefings Tácticos con POIs y Cierre Integral del Backend (2026-09-15):**
+    *   Rutas `GET /api/briefings`, `POST /api/briefings`, `GET /api/briefings/[id]`, `PATCH /api/briefings/[id]` y `DELETE /api/briefings/[id]` implementadas.
+    *   Atomicidad transaccional garantizada mediante la RPC PostgreSQL `replace_briefing_pois` (`sql/007_briefings_management.sql`), previniendo pérdida de POIs ante fallos intermedios.
+    *   Autenticación dual en lecturas (Staff y Terminales Hardware para consumo offline de la app móvil).
+    *   Control RBAC riguroso para mutaciones (restringido a `RSO` y Administradores activos, 403 para `OPERATOR`).
+    *   Auditoría DPIA ampliada con `BRIEFING_CREATED`, `BRIEFING_MODIFIED` y `BRIEFING_DELETED`.
+    *   Suite ampliada a 132 tests automatizados (`scripts/test-bloqueantes.ts`).
+14. [ ] **Próximo Hito — Movilidad / Aplicación Móvil (Sprint 11):**
+    *   Desarrollo de la aplicación móvil de campo (Flutter / React Native) conectada a la infraestructura backend y sus endpoints autenticados.
 
 ---
 

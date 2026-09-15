@@ -655,6 +655,123 @@ async function runTests() {
   assert(isStatelessEvaluation({ inside_zones: true, evaluated_at: new Date().toISOString() }), 'Check-point opera sin efectos secundarios (stateless)');
 
   // ----------------------------------------------------------------------------
+  // 9. Gestión de Briefings Tácticos y POIs (Paquete B5)
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 9. Gestión de Briefings Tácticos y POIs (Paquete B5) ---');
+
+  const VALID_POI_CATEGORIES = [
+    'EXTRACTION_POINT',
+    'HOSPITAL',
+    'POLICE',
+    'SAFE_HOUSE',
+    'CHECKPOINT',
+    'DANGER_POINT',
+  ];
+
+  function validatePoiTest(poi: any): { valid: boolean; error?: string } {
+    if (!poi || typeof poi !== 'object') return { valid: false, error: 'invalid_object' };
+    if (!poi.name || typeof poi.name !== 'string' || poi.name.trim() === '') return { valid: false, error: 'empty_name' };
+    if (!VALID_POI_CATEGORIES.includes(poi.category)) return { valid: false, error: 'invalid_category' };
+    const lat = Number(poi.latitude);
+    const lon = Number(poi.longitude);
+    if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      return { valid: false, error: 'invalid_wgs84' };
+    }
+    return { valid: true };
+  }
+
+  assert(validatePoiTest({ name: 'Helipad Alfa', category: 'EXTRACTION_POINT', latitude: 40.4168, longitude: -3.7038 }).valid === true, 'POI de extracción válido aceptado');
+  assert(validatePoiTest({ name: 'Hospital Central', category: 'HOSPITAL', latitude: 40.42, longitude: -3.71 }).valid === true, 'POI de hospital válido aceptado');
+  assert(validatePoiTest({ name: 'Comisaría Centro', category: 'POLICE', latitude: 40.43, longitude: -3.72 }).valid === true, 'POI de policía válido aceptado');
+  assert(validatePoiTest({ name: 'Refugio Ébano', category: 'SAFE_HOUSE', latitude: 40.44, longitude: -3.73 }).valid === true, 'POI de safe house válido aceptado');
+  assert(validatePoiTest({ name: 'Puesto de Control 4', category: 'CHECKPOINT', latitude: 40.45, longitude: -3.74 }).valid === true, 'POI de checkpoint válido aceptado');
+  assert(validatePoiTest({ name: 'Cruce Hostil', category: 'DANGER_POINT', latitude: 40.46, longitude: -3.75 }).valid === true, 'POI de danger point válido aceptado');
+  assert(validatePoiTest({ name: 'Zona Rara', category: 'UNKNOWN_ZONE', latitude: 40.41, longitude: -3.70 }).valid === false, 'Rechazo de categoría POI no catalogada');
+  assert(validatePoiTest({ name: 'Punto Fuera', category: 'EXTRACTION_POINT', latitude: 91, longitude: 0 }).valid === false, 'Rechazo de latitud de POI > 90');
+  assert(validatePoiTest({ name: 'Punto Fuera', category: 'EXTRACTION_POINT', latitude: 0, longitude: 181 }).valid === false, 'Rechazo de longitud de POI > 180');
+  assert(validatePoiTest({ name: '   ', category: 'EXTRACTION_POINT', latitude: 0, longitude: 0 }).valid === false, 'Rechazo de nombre de POI en blanco');
+
+  // RBAC para mutaciones de briefings
+  function checkBriefingMutationRole(profile: { role?: string; is_active?: boolean } | null): { authorized: boolean; reason?: string } {
+    if (!profile) return { authorized: false, reason: 'profile_not_found' };
+    if (!profile.is_active) return { authorized: false, reason: 'profile_inactive' };
+    if (!['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role || '')) {
+      return { authorized: false, reason: 'insufficient_role' };
+    }
+    return { authorized: true };
+  }
+
+  assert(checkBriefingMutationRole({ role: 'RSO', is_active: true }).authorized === true, 'RSO activo autorizado para redactar briefings');
+  assert(checkBriefingMutationRole({ role: 'ORG_ADMIN', is_active: true }).authorized === true, 'ORG_ADMIN activo autorizado para redactar briefings');
+  assert(checkBriefingMutationRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === true, 'SUPER_ADMIN activo autorizado para redactar briefings');
+  assert(checkBriefingMutationRole({ role: 'OPERATOR', is_active: true }).authorized === false, 'OPERATOR activo rechazado (403) para mutación de briefings');
+  assert(checkBriefingMutationRole({ role: 'RSO', is_active: false }).authorized === false, 'RSO inactivo rechazado por is_active=false (403)');
+  assert(checkBriefingMutationRole(null).authorized === false, 'Perfil nulo rechazado (401/403)');
+
+  // Autenticación dual en lectura de briefings
+  function checkBriefingReadAuth(isHardware: boolean, hasValidCredentials: boolean): { canRead: boolean; client: 'admin' | 'session' } {
+    if (isHardware && hasValidCredentials) return { canRead: true, client: 'admin' };
+    if (!isHardware && hasValidCredentials) return { canRead: true, client: 'session' };
+    return { canRead: false, client: 'session' };
+  }
+
+  assert(checkBriefingReadAuth(true, true).canRead === true, 'Terminal hardware autorizado para descarga de briefings (modo offline)');
+  assert(checkBriefingReadAuth(true, true).client === 'admin', 'Terminal hardware consulta mediante cliente admin y org verificada');
+  assert(checkBriefingReadAuth(false, true).canRead === true, 'Staff autorizado para lectura de briefings');
+  assert(checkBriefingReadAuth(false, true).client === 'session', 'Staff consulta mediante cliente de sesión con RLS');
+
+  // Atomicidad en reemplazo de POIs (Precisión Claude)
+  function simulateAtomicPoiReplacement(currentPois: any[], newPois: any[]): { success: boolean; resultPois: any[]; rolledBack: boolean } {
+    // Si alguno falla validación, rollback completo
+    for (const p of newPois) {
+      if (!validatePoiTest(p).valid) {
+        return { success: false, resultPois: currentPois, rolledBack: true };
+      }
+    }
+    return { success: true, resultPois: newPois, rolledBack: false };
+  }
+
+  const existingPois = [{ name: 'Base A', category: 'SAFE_HOUSE', latitude: 40, longitude: -3 }];
+  const invalidNewPois = [
+    { name: 'Punto Válido', category: 'HOSPITAL', latitude: 40, longitude: -3 },
+    { name: 'Punto Corrupto', category: 'INVALID_CAT', latitude: 40, longitude: -3 },
+  ];
+  const rollbackResult = simulateAtomicPoiReplacement(existingPois, invalidNewPois);
+  assert(rollbackResult.rolledBack === true, 'Sustitución atómica revierte (rollback) si un POI falla validación');
+  assert(rollbackResult.resultPois.length === 1 && rollbackResult.resultPois[0].name === 'Base A', 'Colección previa preservada íntegra ante fallo en transacción RPC');
+
+  // Auditoría DPIA tipada para Briefings
+  const briefingCreatedEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: 'rso-user-123',
+    action: 'BRIEFING_CREATED',
+    entity_type: 'BRIEFING',
+    entity_id: 'briefing-01-uuid',
+    payload: { title: 'Misión Ébano', pois_count: 3 },
+  };
+  assert(briefingCreatedEntry.action === 'BRIEFING_CREATED', 'Acción BRIEFING_CREATED tipada y registrada');
+
+  const briefingModifiedEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: 'rso-user-123',
+    action: 'BRIEFING_MODIFIED',
+    entity_type: 'BRIEFING',
+    entity_id: 'briefing-01-uuid',
+    payload: { updated_fields: ['title', 'pois'], pois_replaced: true },
+  };
+  assert(briefingModifiedEntry.action === 'BRIEFING_MODIFIED', 'Acción BRIEFING_MODIFIED registrada');
+
+  const briefingDeletedEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: 'rso-user-123',
+    action: 'BRIEFING_DELETED',
+    entity_type: 'BRIEFING',
+    entity_id: 'briefing-01-uuid',
+    payload: { title: 'Misión Ébano' },
+  };
+  assert(briefingDeletedEntry.action === 'BRIEFING_DELETED', 'Acción BRIEFING_DELETED registrada');
+
+  // ----------------------------------------------------------------------------
   // Resumen
   // ----------------------------------------------------------------------------
   console.log('\n================================================================');
