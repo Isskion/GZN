@@ -32,21 +32,41 @@ GZN no es una aplicación convencional de navegación o mensajería; es un siste
 
 ## 3. Arquitectura del Backend y Flujos Operativos
 
-### 3.1. Modelo Jerárquico Multi-tenant (Tenancy)
+### 3.1. Modelo Jerárquico Multi-tenant y Matriz de Roles (RBAC)
+
 ```mermaid
 graph TD
     A[Organización / Conglomerado] --> B[Filial / Región / Unidad de Misión]
-    B --> C[RSO - Regional Security Officer]
+    B --> C[Staff de Mando / Consola: profiles]
+    C --> C1[SUPER_ADMIN: Global Cross-Tenant]
+    C --> C2[ORG_ADMIN: Director de Seguridad del Tenant]
+    C --> C3[RSO: Regional Security Officer Táctico]
+    C --> C4[OPERATOR: Sala de Control y Monitoreo]
     B --> D[Zonas y Geometrías GeoJSON]
-    C --> E[El Rebaño - Grupo de Viajeros / Convoyes]
-    E --> F[Viajes / Rutas Activas]
-    F --> G[Alertas, Pánicos y Check-ins]
+    B --> E[Sujetos Protegidos / El Rebaño: travelers]
+    E --> F[Hardware Binding: x-device-secret / ECDSA]
+    E --> G[Telemetría, Rutas y Alertas SOS]
 ```
 
-*   **Organización:** Cliente matriz (Conglomerado multinacional).
-*   **Filial / Región:** Subdivisión geográfica o societaria (ej. *África Occidental*, *Colombia Operaciones*).
-*   **RSO (Regional Security Officer):** Usuario gestor con acceso a su consola operativa, definición de áreas y mando sobre el "rebaño".
-*   **Viajeros / Rebaño:** Usuarios sobre el terreno (expatriados, conductores, técnicos) vinculados a uno o varios RSOs.
+#### A. Correspondencia Formal de Roles (Hoja de Ruta v0.8 vs. DDL PostgreSQL)
+
+| Rol Hoja de Ruta (v0.8) | Rol DDL (`profiles.role`) | Interfaz / Ámbito | Capacidades Tácticas y Operativas |
+| :--- | :--- | :--- | :--- |
+| **`GLOBAL_ADMIN`** | **`SUPER_ADMIN`** | Consola Web / Global | Administrador de plataforma. Bypasea filtro de organización en RLS (`get_auth_role() = 'SUPER_ADMIN'`). Gestión de tenants y auditoría global. |
+| **`SECURITY_DIRECTOR`** | **`ORG_ADMIN`** | Consola Web / Tenant | Administrador corporativo. Gestión de perfiles de operadores (`INSERT/UPDATE` en `profiles`), consulta integral de `audit_logs` y configuración del tenant. |
+| **`REGIONAL_RSO`** | **`RSO`** | Consola Web / Operativo | Oficial Regional de Seguridad. Creación y edición de perímetros y zonas de riesgo (`zones`), redacción de briefings y POIs (`briefings`), asignación y alta de viajeros (`travelers`), triaje y resolución de incidentes (`alerts`). |
+| **`FIELD_OPERATOR_ESCORT`** | **`OPERATOR`** | Consola Web / Monitor | Operador de Sala de Control / Despacho / Escolta. Monitorización pasiva en tiempo real del mapa, telemetría y alertas. **Sin permisos** para crear o alterar zonas (`create_zone_with_geojson` devuelve HTTP 403) ni invitar/aprovisionar personal. |
+| **`TRAVELER`** | **Entidad `travelers`** | Terminal Móvil / Terreno | **Personal protegido en campo ("El Rebaño").** No es un usuario de consola web. Emite telemetría (`POST /api/telemetry`) y SOS (`POST /api/alerts`) mediante enlace criptográfico de hardware. |
+
+#### B. Separación Ontológica: Personal de Consola (`profiles`) vs. Terreno (`travelers`)
+
+La tabla `public.profiles` está vinculada mediante clave foránea 1:1 a `auth.users(id)` (`REFERENCES auth.users(id) ON DELETE CASCADE`). Los usuarios de `profiles` son personas humanas que inician sesión interactiva en la consola web con credenciales Supabase Auth (cookies / JWT).
+
+Por el contrario, la entidad **`TRAVELER` reside exclusivamente en `public.travelers`** y no posee cuenta en `profiles` por cuatro razones de misión crítica:
+1. **Contención de Superficie de Ataque:** Evita que un viajero pueda iniciar sesión en la URL de la consola de mando web o acceder a la cartografía táctica general de otros operativos.
+2. **Privacidad y OpSec:** Las políticas RLS de `profiles` permiten visibilidad interna entre miembros del tenant. Aislar a los viajeros en `public.travelers` impide que un dispositivo capturado en campo pueda enumerar al resto de viajeros o conocer sus trayectorias.
+3. **Flujo de Aprovisionamiento Estricto:** Cumple la regla de la Hoja de Ruta: *"Alta por invitación y aprovisionamiento gestionado por el RSO; prohibido el autorregistro público"*. El RSO crea la fila en `travelers` y vincula el hardware mediante aprovisionamiento directo (`device_secret_hash`).
+4. **Eficiencia en Redes Hostiles:** Los terminales móviles emiten pings de telemetría a alta frecuencia (hasta 1 Hz) sobre redes 2G o satelitales. Utilizan una autenticación compacta de hardware (`x-device-secret` / firma ECDSA P-256) sin sobrecarga de tokens web interactivos.
 
 ---
 
@@ -352,6 +372,12 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     3. **Creación de Zonas e Integridad Geoespacial:** Despliegue de `sql/003_zone_creation_rpc.sql` con la función RPC `create_zone_with_geojson` (usa `ST_GeomFromGeoJSON`, `ST_SetSRID` en 4326 y `ST_IsValid`). Se elimina el fallback de inserción directa silenciosa en el route handler y se implementa validador estricto en servidor (`validateGeoJSONPolygon`) para devolver 400 controlado ante geometrías malformadas o anillos no cerrados. Se añade control estricto de roles en la RPC (`public.get_auth_role() IN ('RSO', 'ORG_ADMIN', 'SUPER_ADMIN')`) para impedir que operadores (`OPERATOR`) escalen privilegios creando zonas dentro del mismo tenant (error HTTP 403).  
     *Nota de Gobernanza y Auditoría (2026-09-14):* La validación inicial con ramas mock de desarrollo en `session.ts` fue rechazada formalmente por la auditoría por no ser representativa del sistema real y suponer un patrón inseguro. Se eliminó cualquier mecanismo de bypass o sesión simulada en `src/lib/auth/session.ts`. Toda validación descansa exclusivamente en `public.get_auth_role()` en PostgreSQL y `supabase.auth.getUser()` real.
 
+*   **ADR-007 (2026-09-15): Modelo de Identidades Dual: Separación entre Staff de Consola (profiles) y Sujetos de Protección en Terreno (travelers).**  
+    *Decisión:* Resolución del Punto 3 de la auditoría (Claude):
+    1. **Mapeo Formal de Roles:** Se formaliza la correspondencia 1:1 entre los roles de la Hoja de Ruta v0.8 y el DDL: `GLOBAL_ADMIN` -> `SUPER_ADMIN`, `SECURITY_DIRECTOR` -> `ORG_ADMIN`, `REGIONAL_RSO` -> `RSO`, `FIELD_OPERATOR_ESCORT` -> `OPERATOR`.
+    2. **Separación Ontológica:** `public.profiles` está vinculado a `auth.users(id)` y restringido exclusivamente a roles de staff con acceso a la consola de mando web. Los viajeros residen en `public.travelers` como sujetos protegidos en campo, sin cuenta interactiva de consola. Se autentican mediante enlace de hardware (`x-device-secret` / ECDSA P-256), preservando el principio de mínimo privilegio, la contención de superficie de ataque y el secreto de las rutas entre compañeros de organización.
+    3. **Hoja de Ruta hacia App Móvil:** Para futuras versiones de la app con interfaz de usuario personalizada (briefings y POIs individuales), se habilitará la relación opcional `travelers.user_id REFERENCES auth.users(id)` con salvaguardas RLS que impidan el acceso a la consola de mando.
+
 ---
 
 ## 8. Estado de Implementación y Próximos Sprints
@@ -367,8 +393,12 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
    *   Script `sql/003_zone_creation_rpc.sql` con la RPC `create_zone_with_geojson` y `get_active_zones`.
    *   Validador TypeScript `validateGeoJSONPolygon` en `src/lib/geo/validation.ts` (retorna 400 descriptivo ante polígonos no cerrados o vértices inválidos).
    *   Eliminación del fallback silencioso en `POST /api/zones`.
-5. [ ] **Próximo Hito — Revisión de Claude & Despliegue en Vercel:**
-   *   Superar checklist de auditoría de Claude en `intercambio/desde-claude/`.
-   *   Vincular variables de entorno en Vercel y repositorio GitHub tras visto bueno explícito.
-   *   Módulo interactivo de dibujo de polígonos (MapLibre Draw) directamente desde la consola RSO.
+5. [x] **Resolución Punto 3 — Modelo de Roles y Entidad Travelers (Auditoría 2026-09-15):**
+   *   Documentación exhaustiva en Sección 3.1 y ADR-007 sobre el modelo de identidades dual y justificación de por qué `TRAVELER` reside en `travelers` y no en `profiles`.
+   *   Informe de entrega y análisis entregado en `intercambio/desde-gemini/2026-09-15-analisis-modelo-roles-travelers.md`.
+6. [ ] **Próximos Hitos (Sección "Importante" de la Auditoría):**
+   *   **Punto 4:** Creación de `sql/004_zones_enhancements.sql` (`buffer_meters`, toques de queda y metadatos de refugios).
+   *   **Punto 5:** Inserción de eventos en `audit_logs` en las rutas API para trazabilidad DPIA.
+   *   **Punto 6:** Sinceramiento de arquitectura en `MEMORIA.md` (restringir Firebase a FCM push).
+   *   Despliegue y vinculación en Vercel.
 
