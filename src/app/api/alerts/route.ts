@@ -59,6 +59,13 @@ export async function GET(request: NextRequest) {
     }
 
     if (travelerId) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(travelerId)) {
+        return NextResponse.json(
+          { error: 'Parámetro traveler_id inválido. Debe ser un UUID válido.' },
+          { status: 400 }
+        );
+      }
       query = query.eq('traveler_id', travelerId);
     }
 
