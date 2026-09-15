@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedSession } from '@/lib/auth/session';
 import { validateGeoJSONPolygon, validateZoneEnhancements } from '@/lib/geo/validation';
+import { logAuditEvent } from '@/lib/audit/logger';
 
 // GET /api/zones — Obtener zonas activas de la organización del usuario
 export async function GET(request: NextRequest) {
@@ -74,7 +75,7 @@ export async function GET(request: NextRequest) {
 // POST /api/zones — Crear una nueva zona táctica mediante la RPC PostGIS
 export async function POST(request: NextRequest) {
   try {
-    const { authenticated, supabase, error: authError } = await getAuthenticatedSession(request);
+    const { authenticated, supabase, user, error: authError } = await getAuthenticatedSession(request);
 
     if (!authenticated || !supabase) {
       return NextResponse.json(
@@ -181,6 +182,27 @@ export async function POST(request: NextRequest) {
         { status: isForbidden ? 403 : 400 }
       );
     }
+
+    // Registrar evento inmutable en public.audit_logs (Trazabilidad DPIA / RGPD Art. 35)
+    await logAuditEvent(supabase, {
+      organization_id: data.organization_id,
+      performed_by: user?.id || null,
+      action: 'ZONE_CREATED',
+      entity_type: 'ZONE',
+      entity_id: data.id,
+      payload: {
+        name: data.name,
+        severity: data.severity,
+        buffer_meters: data.buffer_meters,
+        is_curfew: data.is_curfew,
+        curfew_start: data.curfew_start,
+        curfew_end: data.curfew_end,
+        contact_phone: data.contact_phone,
+        radio_frequency: data.radio_frequency,
+        gate_access_protocol: data.gate_access_protocol,
+        valid_until: data.valid_until,
+      },
+    });
 
     return NextResponse.json({ success: true, zone: data }, { status: 201 });
   } catch (err: any) {

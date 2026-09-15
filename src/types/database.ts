@@ -120,3 +120,15 @@ export interface SafeHavenResult {
   zone_name: string;
   distance_meters: number;
 }
+
+export interface AuditLog {
+  id: string;
+  organization_id: string;
+  performed_by?: string | null;
+  action: string;
+  entity_type: string;
+  entity_id?: string | null;
+  payload?: Record<string, any> | null;
+  created_at: string;
+}
+

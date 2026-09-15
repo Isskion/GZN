@@ -398,6 +398,14 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     3. **Metadatos Tácticos de Refugios (`contact_phone`, `radio_frequency`, `gate_access_protocol`):** Enriquecimiento de zonas `SAFE_HAVEN` para que la función RPC `find_nearest_safe_haven` provea inmediatamente teléfono de enlace, frecuencia de radio en MHz y protocolo de acceso al puesto de guardia cuando un convoy solicite escape de emergencia.
     4. **Actualización Integral de RPCs y API:** Implementación en `sql/004_zones_enhancements.sql`, validador TypeScript en servidor (`validateZoneEnhancements`) y adaptación completa de `GET/POST /api/zones`.
 
+*   **ADR-009 (2026-09-15): Trazabilidad Inmutable DPIA: Registro Forense de Eventos de Seguridad en audit_logs.**  
+    *Decisión:* Resolución del Punto 5 de la auditoría (Claude / RGPD Art. 35 / Duty of Care):
+    1. **Servicio Centralizado (`src/lib/audit/logger.ts`):** Módulo `logAuditEvent` con tipos estrictos para acciones (`ZONE_CREATED`, `ALERT_TRIGGERED`, `ZONE_VIOLATION_DETECTED`, `ALERT_RESOLVED`) y entidades (`ZONE`, `ALERT`, `TRAVELER`). Principio *fail-safe* para no bloquear el despacho de emergencias en caso de incidencia transitoria en logs.
+    2. **Trazabilidad en Creación de Zonas (`POST /api/zones`):** Se registra `ZONE_CREATED` con el `performed_by` del usuario RSO autenticado y payload con la configuración perimetral completa.
+    3. **Trazabilidad en Alertas SOS (`POST /api/alerts`):** Se registra `ALERT_TRIGGERED` diferenciando el origen: `performed_by = user.id` para SOS manual desde la consola RSO (`trigger_source: 'RSO_CONSOLE'`), o `performed_by = null` con `traveler_id` y `trigger_source: 'DEVICE_HARDWARE'` para disparos desde terminales móviles.
+    4. **Trazabilidad en Incursiones Espaciales (`POST /api/telemetry`):** Se registra `ZONE_VIOLATION_DETECTED` automáticamente cuando PostGIS detecta penetración en zona roja, archivando coordenadas, velocidad satelital y nivel de batería.
+    5. **Inmutabilidad Absoluta:** Garantizada por las políticas RLS de `audit_logs` (solo `INSERT` y `SELECT`; sin `UPDATE` ni `DELETE`).
+
 ---
 
 ## 8. Estado de Implementación y Próximos Sprints
@@ -422,8 +430,13 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
    *   Validador `validateZoneEnhancements` en `src/lib/geo/validation.ts`.
    *   Endpoints `GET /api/zones` y `POST /api/zones` actualizados.
    *   Suite de pruebas automatizada ampliada a 18 tests (`scripts/test-bloqueantes.ts`).
-7. [ ] **Próximos Hitos (Sección "Importante" de la Auditoría):**
-   *   **Punto 5:** Inserción de eventos en `audit_logs` en las rutas API para trazabilidad DPIA.
+7. [x] **Resolución Punto 5 — Trazabilidad DPIA con audit_logs (Auditoría 2026-09-15):**
+   *   Módulo `src/lib/audit/logger.ts` para registro inmutable.
+   *   Registro en `POST /api/zones` (`ZONE_CREATED` con `performed_by`).
+   *   Registro en `POST /api/alerts` (`ALERT_TRIGGERED` discriminando RSO vs Hardware).
+   *   Registro en `POST /api/telemetry` (`ZONE_VIOLATION_DETECTED` ante alertas rojas).
+   *   Suite de pruebas automatizada ampliada a 26 tests (`scripts/test-bloqueantes.ts`).
+8. [ ] **Próximos Hitos (Sección "Importante" de la Auditoría):**
    *   **Punto 6:** Sinceramiento de arquitectura en `MEMORIA.md` (restringir Firebase a FCM push).
    *   Despliegue y vinculación en Vercel.
 

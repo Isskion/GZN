@@ -11,6 +11,7 @@ import { NextRequest } from 'next/server';
 import crypto from 'crypto';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { sendEmergencyPushToTopic } from '@/lib/firebase/admin';
+import { logAuditEvent } from '@/lib/audit/logger';
 
 export interface DeviceAuthResult {
   authenticated: boolean;
@@ -163,6 +164,27 @@ export async function processVerifiedTelemetry(
               severity: 'CRITICAL',
             }
           );
+
+          // Registrar evento inmutable en public.audit_logs (Trazabilidad DPIA / RGPD Art. 35)
+          await logAuditEvent(supabase, {
+            organization_id: orgId,
+            performed_by: null,
+            action: 'ZONE_VIOLATION_DETECTED',
+            entity_type: 'ZONE',
+            entity_id: currentZone.zone_id,
+            payload: {
+              traveler_id: traveler.id,
+              traveler_name: traveler.full_name,
+              callsign: traveler.callsign,
+              zone_id: currentZone.zone_id,
+              zone_name: currentZone.zone_name,
+              coordinates: [longitude, latitude],
+              speed_kmh: speedKmh ?? null,
+              battery_level: batteryLevel ?? null,
+              alert_type: 'ZONE_VIOLATION',
+              severity: 'CRITICAL',
+            },
+          });
         }
       }
     } else if (currentZone.severity === 'AMBER') {
@@ -258,6 +280,25 @@ export async function triggerDevicePanicAlert(
       type: 'PANIC_BUTTON',
     }
   );
+
+  // 4. Registrar evento inmutable en public.audit_logs (Trazabilidad DPIA / RGPD Art. 35)
+  await logAuditEvent(supabase, {
+    organization_id: orgId,
+    performed_by: null,
+    action: 'ALERT_TRIGGERED',
+    entity_type: 'ALERT',
+    entity_id: alertData.id,
+    payload: {
+      traveler_id: traveler.id,
+      traveler_name: traveler.full_name,
+      callsign: traveler.callsign,
+      alert_type: type,
+      severity: 'CRITICAL',
+      coordinates: [longitude, latitude],
+      memo: memo || '¡BOTÓN DE PÁNICO ACTIVADO POR EL DISPOSITIVO!',
+      trigger_source: 'DEVICE_HARDWARE',
+    },
+  });
 
   return alertData;
 }

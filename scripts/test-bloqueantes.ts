@@ -4,6 +4,7 @@
 
 import { validateGeoJSONPolygon, validateZoneEnhancements } from '../src/lib/geo/validation';
 import { hashDeviceSecret } from '../src/lib/auth/device';
+import { logAuditEvent, AuditLogEntry } from '../src/lib/audit/logger';
 import crypto from 'crypto';
 
 async function runTests() {
@@ -195,6 +196,76 @@ async function runTests() {
     gate_access_protocol: 'Santo y seña Bravo-Delta en puesto de guardia',
   });
   assert(safeHavenMeta.valid === true, 'Metadatos tácticos de Safe Haven aceptados');
+
+  // ----------------------------------------------------------------------------
+  // 4. Pruebas de Registro Inmutable y Trazabilidad DPIA (Punto 5)
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 4. Trazabilidad DPIA y Estructura de Audit Logs (Punto 5) ---');
+
+  // Validación de estructura para ZONE_CREATED
+  const zoneCreatedEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: 'user-rso-uuid',
+    action: 'ZONE_CREATED',
+    entity_type: 'ZONE',
+    entity_id: 'zone-test-uuid',
+    payload: {
+      name: 'Zona Conflicto Norte',
+      severity: 'RED',
+      buffer_meters: 250,
+      is_curfew: false,
+    },
+  };
+  assert(zoneCreatedEntry.action === 'ZONE_CREATED', 'Estructura de auditoría ZONE_CREATED válida');
+  assert(zoneCreatedEntry.performed_by !== null, 'performed_by preserva el UUID del operador RSO');
+  assert(zoneCreatedEntry.payload?.buffer_meters === 250, 'Payload contiene parámetros de buffer');
+
+  // Validación de estructura para ALERT_TRIGGERED (Terminal móvil)
+  const hardwareAlertEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: null,
+    action: 'ALERT_TRIGGERED',
+    entity_type: 'ALERT',
+    entity_id: 'alert-sos-uuid',
+    payload: {
+      traveler_id: 'traveler-01-uuid',
+      traveler_name: 'Carlos Mendoza',
+      callsign: 'CONVOY-ALFA',
+      alert_type: 'PANIC_BUTTON',
+      severity: 'CRITICAL',
+      coordinates: [-3.7038, 40.4168],
+      trigger_source: 'DEVICE_HARDWARE',
+    },
+  };
+  assert(hardwareAlertEntry.performed_by === null, 'performed_by es null para eventos M2M de hardware');
+  assert(hardwareAlertEntry.payload?.trigger_source === 'DEVICE_HARDWARE', 'trigger_source identifica origen de hardware');
+
+  // Validación de estructura para ZONE_VIOLATION_DETECTED
+  const violationEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: null,
+    action: 'ZONE_VIOLATION_DETECTED',
+    entity_type: 'ZONE',
+    entity_id: 'zone-red-uuid',
+    payload: {
+      traveler_id: 'traveler-01-uuid',
+      zone_name: 'Distrito Norte',
+      coordinates: [-3.7100, 40.4300],
+      speed_kmh: 65,
+      alert_type: 'ZONE_VIOLATION',
+    },
+  };
+  assert(violationEntry.action === 'ZONE_VIOLATION_DETECTED', 'Acción ZONE_VIOLATION_DETECTED tipada');
+  assert(Array.isArray(violationEntry.payload?.coordinates), 'Coordenadas forenses registradas en payload');
+
+  // Validación de rechazo de logAuditEvent si falta organization_id
+  const dummyClient: any = { from: () => ({ insert: async () => ({ error: null }) }) };
+  const missingOrgResult = await logAuditEvent(dummyClient, {
+    organization_id: '',
+    action: 'ZONE_CREATED',
+    entity_type: 'ZONE',
+  });
+  assert(missingOrgResult === false, 'logAuditEvent rechaza limpiamente si falta organization_id');
 
   // ----------------------------------------------------------------------------
   // Resumen

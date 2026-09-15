@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedSession } from '@/lib/auth/session';
 import { verifyDeviceAuth, triggerDevicePanicAlert } from '@/lib/auth/device';
 import { sendEmergencyPushToTopic } from '@/lib/firebase/admin';
+import { logAuditEvent } from '@/lib/audit/logger';
 
 // GET /api/alerts — Listar alertas activas de la organización
 export async function GET(request: NextRequest) {
@@ -172,6 +173,25 @@ export async function POST(request: NextRequest) {
         type: 'MANUAL_SOS',
       }
     );
+
+    // Registrar evento inmutable en public.audit_logs (Trazabilidad DPIA / RGPD Art. 35)
+    await logAuditEvent(supabase, {
+      organization_id: orgId,
+      performed_by: user.id,
+      action: 'ALERT_TRIGGERED',
+      entity_type: 'ALERT',
+      entity_id: alertData.id,
+      payload: {
+        traveler_id: traveler.id,
+        traveler_name: traveler.full_name,
+        callsign: traveler.callsign,
+        alert_type: type,
+        severity: 'CRITICAL',
+        coordinates: [longitude, latitude],
+        memo: memo || '¡SOS MANUAL ACTIVADO POR EL OPERADOR RSO!',
+        trigger_source: 'RSO_CONSOLE',
+      },
+    });
 
     return NextResponse.json({ success: true, alert: alertData }, { status: 201 });
   } catch (err: any) {
