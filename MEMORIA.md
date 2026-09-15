@@ -402,7 +402,7 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     2. **Trazabilidad en Creación de Zonas (`POST /api/zones`):** Se registra `ZONE_CREATED` con el `performed_by` del usuario RSO autenticado y payload con la configuración perimetral completa.
     3. **Trazabilidad en Alertas SOS (`POST /api/alerts`):** Se registra `ALERT_TRIGGERED` diferenciando el origen: `performed_by = user.id` para SOS manual desde la consola RSO (`trigger_source: 'RSO_CONSOLE'`), o `performed_by = null` con `traveler_id` y `trigger_source: 'DEVICE_HARDWARE'` para disparos desde terminales móviles.
     4. **Trazabilidad en Incursiones Espaciales (`POST /api/telemetry`):** Se registra `ZONE_VIOLATION_DETECTED` automáticamente cuando PostGIS detecta penetración en zona roja, archivando coordenadas, velocidad satelital y nivel de batería.
-    5. **Inmutabilidad Absoluta:** Garantizada por las políticas RLS de `audit_logs` (solo `INSERT` y `SELECT`; sin `UPDATE` ni `DELETE`).
+    5. **Inmutabilidad y Garantías Forenses:** Garantizada a nivel de aplicación frente a usuarios autenticados mediante las políticas RLS de `audit_logs` (solo `INSERT` y `SELECT`; sin `UPDATE` ni `DELETE` para usuarios finales, operadores o RSO). Se reconoce la distinción técnica inherente a PostgreSQL/Supabase donde la clave de infraestructura `service_role` tiene capacidad de bypass de RLS para tareas de mantenimiento y migraciones internas.
 
 ---
 
