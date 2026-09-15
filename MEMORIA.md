@@ -499,7 +499,7 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     2. **Regla de Oro Agéntica en Git:** Se ratifica que **ningún `git push` a `main` o `develop` se ejecuta sin el previo informe de entrega en `intercambio/desde-gemini/`, el veredicto favorable de Claude en `intercambio/desde-claude/` y la aprobación explícita de Daniel**. El paso del CI técnico es condición necesaria pero no suficiente.
     3. **Quality Gate Automatizado (GitHub Actions CI):** Configuración de `.github/workflows/ci.yml` ejecutado en Node 22 y pnpm v10 sobre ramas `main` y `develop`. El flujo valida `pnpm install --frozen-lockfile`, `pnpm build` (valida tipos de TypeScript; el linting de estilo ESLint queda pendiente de configurar y no se ejecuta actualmente en ningún paso) y la suite completa de 132 tests automatizados (`pnpm test`).
     4. **Higiene de Despliegue (`.vercelignore`):** Aislamiento estricto en despliegues de producción, excluyendo de los builds de Vercel la carpeta de gobernanza `/intercambio/`, la documentación interna `MEMORIA.md`, los scripts de pruebas `scripts/`, las migraciones SQL locales `sql/` y la configuración interna `.github/`.
-    5. **Vinculación a Vercel:** Proyecto a enlazar bajo el equipo `isskions-projects` con el proyecto `gzn` para hosting serverless de la consola RSO y los endpoints del Core Backend tras la aprobación de despliegue.
+    5. **Vinculación a Vercel:** Proyecto enlazado bajo el equipo `isskions-projects` con el proyecto `gzn`, conectado al repositorio GitHub `Isskion/GZN` y desplegado en producción en `https://gzn-coral.vercel.app` para hosting serverless de la consola RSO y los endpoints del Core Backend.
 
 ---
 
@@ -571,11 +571,12 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   Control RBAC riguroso para mutaciones (restringido a `RSO` y Administradores activos, 403 para `OPERATOR`).
     *   Auditoría DPIA ampliada con `BRIEFING_CREATED`, `BRIEFING_MODIFIED` y `BRIEFING_DELETED`.
     *   Suite ampliada a 132 tests automatizados (`scripts/test-bloqueantes.ts`).
-14. [x] **Infraestructura Git, CI/CD y Vercel (2026-09-15):**
-    *   Estructura Git de doble rama (`main` y `develop`) y gobernanza de push blindada por veredicto agéntico.
-    *   Workflow de GitHub Actions `.github/workflows/ci.yml` configurado con compilación Next.js y suite de 132 tests automatizados.
-    *   Filtro `.vercelignore` para higiene del bundle de producción y protección de artefactos internos.
-    *   Script `"test": "npx tsx scripts/test-bloqueantes.ts"` integrado en `package.json`.
+14. [x] **Infraestructura Git, CI/CD y Despliegue en Vercel (2026-09-15):**
+    *   Estructura Git de doble rama (`main` y `develop`) sincronizada y protegida por la Regla de Oro.
+    *   Quality Gate en GitHub Actions (`CI Quality Gate`) validado en verde para ambas ramas (runs exitosos en ~50s).
+    *   Filtro `.vercelignore` aislando `/intercambio/`, `MEMORIA.md`, `scripts/`, `sql/` y `.github/`.
+    *   Proyecto `gzn` creado en Vercel bajo el equipo `isskions-projects`, conectado a GitHub `Isskion/GZN`.
+    *   Despliegue de producción activo y accesible en `https://gzn-coral.vercel.app` con HTTP 200 y validación de endpoints serverless.
 15. [ ] **Próximo Hito — Movilidad / Aplicación Móvil (Sprint 11):**
     *   Desarrollo de la aplicación móvil de campo (Flutter / React Native) conectada a la infraestructura backend y sus endpoints autenticados.
 

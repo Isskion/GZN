@@ -29,3 +29,5 @@ next-env.d.ts
 
 # buzón de intercambio Claude/Gemini (contiene detalle de vulnerabilidades, no se publica)
 /intercambio/
+.vercel
+.env*
