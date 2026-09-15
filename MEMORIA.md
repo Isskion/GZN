@@ -462,6 +462,56 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
    *   Filtros (`status`, `severity`, `traveler_id`) y paginación en `GET /api/alerts`.
    *   Acción `ALERT_STATUS_CHANGED` en `AuditAction` y trazabilidad forense completa.
    *   Suite ampliada a 45 tests automatizados (`scripts/test-bloqueantes.ts`).
+*   **ADR-012 (2026-09-15): Gestión de Viajeros y Terminales Hardware: Enrolamiento Seguro, Blindaje Multi-Incidente y Salvaguarda Forense CASCADE.**  
+    *Decisión:* Implementación del Paquete B3 del Core Backend GZN:
+    1. **Rutas RESTful (`/api/travelers` y `/api/travelers/[id]`):** Se implementan `GET /api/travelers` (listado con filtros de estado y oficial asignado, excluyendo estrictamente `device_secret_hash`), `GET /api/travelers/[id]` (ficha individual), `POST /api/travelers` (alta y aprovisionamiento criptográfico) y `PATCH /api/travelers/[id]` (mantenimiento y rotación de credenciales).
+    2. **Enrolamiento Criptográfico de Hardware:** Durante el `POST /api/travelers`, se genera un secreto aleatorio de 256 bits (`crypto.randomBytes(32)`). Se almacena exclusivamente su hash SHA-256 en `travelers.device_secret_hash` y se devuelve el secreto en plano una única vez para su configuración en el terminal móvil.
+    3. **Rotación de Credenciales de Emergencia (`rotate_device_secret: true`):** En `PATCH`, se permite generar un nuevo secreto revocando el anterior, registrado en `audit_logs` con la acción específica `TRAVELER_CREDENTIAL_ROTATED`.
+    4. **Blindaje de la Lógica Multi-Incidente (Mandato Claude):** Se prohíbe explícitamente la modificación del campo `status` a través de `PATCH /api/travelers/[id]` (retornando `HTTP 400 Bad Request`). Esto garantiza que ningún operador pueda marcar manualmente a un viajero como `SAFE` mientras persistan alertas críticas activas, preservando la lógica construida en el Paquete B1 (ADR-010).
+    5. **Salvaguarda Forense contra CASCADE en Borrado:** Debido a que `public.alerts.traveler_id` tiene `ON DELETE CASCADE`, el endpoint `DELETE` aplica por defecto una baja táctica (`status = 'INCOMMUNICADO'`, revocación de secreto con `device_secret_hash = NULL`). El borrado físico (`?permanent=true`) se bloquea con `HTTP 409 Conflict` si existen alertas históricas vinculadas, protegiendo la cadena de custodia pericial (DPIA / RGPD Art. 35).
+    6. **Sincronización RLS y Control RBAC (Migración 005):** Creación de `sql/005_travelers_rls_policies.sql` para sustituir la política permisiva de `UPDATE` por una restringida a `RSO` y Administradores, y añadir la política `FOR DELETE`. En la API se verifica perfil activo (`is_active = true`), rechazando con `HTTP 403 Forbidden` a `OPERATOR`.
+
+---
+
+## 8. Estado de Implementación y Próximos Sprints
+
+1. [x] **Base de Datos & Seguridad en Supabase:** Esquema PostGIS desplegado y **Row Level Security (RLS) activo** con políticas multi-tenant (`sql/001_initial_schema_postgis.sql` y `sql/002_rls_security_policies.sql`) en `hyhfdzribmathwridokg`.
+2. [x] **Consola RSO & Core Backend en Next.js:** Estructura completa inicializada en `/home/daniel/GZN` con TypeScript, Tailwind CSS táctico y visor cartográfico MapLibre GL (`src/app/page.tsx`). Compilación verificada con `pnpm build` (exit code 0).
+3. [x] **Resolución Bloqueante 1 (Auditoría 2026-09-14):**
+   *   Autenticación de sesión en `/api/zones` (GET/POST) y `/api/alerts` (GET).
+   *   Autenticación de hardware pre-compartido (`x-device-secret` + `device_secret_hash` SHA-256) en `/api/telemetry` y `/api/alerts` (SOS).
+   *   Eliminación de `createAdminClient()` en todas las rutas de `src/app/api/`.
+   *   Multi-tenancy forzado por RLS (`get_auth_org_id()`), prohibiendo inyección de `organization_id` por cliente.
+4. [x] **Resolución Bloqueante 2 (Auditoría 2026-09-14):**
+   *   Script `sql/003_zone_creation_rpc.sql` con la RPC `create_zone_with_geojson` y `get_active_zones`.
+   *   Validador TypeScript `validateGeoJSONPolygon` en `src/lib/geo/validation.ts` (retorna 400 descriptivo ante polígonos no cerrados o vértices inválidos).
+   *   Eliminación del fallback silencioso en `POST /api/zones`.
+5. [x] **Resolución Punto 3 — Modelo de Roles y Entidad Travelers (Auditoría 2026-09-15):**
+   *   Documentación exhaustiva en Sección 3.1 y ADR-007 sobre el modelo de identidades dual y justificación de por qué `TRAVELER` reside en `travelers` y no en `profiles`.
+   *   Informe de entrega y análisis entregado en `intercambio/desde-gemini/2026-09-15-analisis-modelo-roles-travelers.md`.
+6. [x] **Resolución Punto 4 — Ampliación de Zonas: Buffers, Curfews y Safe Havens (Auditoría 2026-09-15):**
+   *   Migración desplegable en `sql/004_zones_enhancements.sql`.
+   *   Campos añadidos a `zones` y `travelers` (tipos en `src/types/database.ts`).
+   *   Validador `validateZoneEnhancements` en `src/lib/geo/validation.ts`.
+   *   Endpoints `GET /api/zones` y `POST /api/zones` actualizados.
+   *   Suite de pruebas automatizada ampliada a 18 tests (`scripts/test-bloqueantes.ts`).
+7. [x] **Resolución Punto 5 — Trazabilidad DPIA con audit_logs (Auditoría 2026-09-15):**
+   *   Módulo `src/lib/audit/logger.ts` para registro inmutable.
+   *   Registro en `POST /api/zones` (`ZONE_CREATED` con `performed_by`).
+   *   Registro en `POST /api/alerts` (`ALERT_TRIGGERED` discriminando RSO vs Hardware).
+   *   Registro en `POST /api/telemetry` (`ZONE_VIOLATION_DETECTED` ante alertas rojas).
+   *   Suite de pruebas automatizada ampliada a 26 tests (`scripts/test-bloqueantes.ts`).
+8. [x] **Resolución Punto 6 — Sinceramiento de Arquitectura (Auditoría 2026-09-15):**
+   *   Sección 1 y Sección 5 actualizadas consolidando a PostgreSQL + PostGIS como almacén único de telemetría y geofencing.
+   *   Firebase formalizado exclusivamente como pasarela de notificaciones push prioritarias (FCM vía Firebase Admin SDK).
+   *   ADR-001 corregido eliminando referencias a colecciones no implementadas de Firestore.
+   *   Documentación de limitaciones conocidas (MultiPolygon, APNs Critical Alerts y maqueta de consola) incorporada en Sección 9.
+9. [x] **Core Backend — Paquete B1: Gestión del Ciclo de Vida de Alertas (2026-09-15):**
+   *   Rutas `GET /api/alerts/[id]` y `PATCH /api/alerts/[id]` creadas.
+   *   Lógica Multi-Incidente implementada: bloqueo de reset a `SAFE` de viajero si persisten otras alertas activas.
+   *   Filtros (`status`, `severity`, `traveler_id`) y paginación en `GET /api/alerts`.
+   *   Acción `ALERT_STATUS_CHANGED` en `AuditAction` y trazabilidad forense completa.
+   *   Suite ampliada a 45 tests automatizados (`scripts/test-bloqueantes.ts`).
 10. [x] **Core Backend — Paquete B2: Gestión Completa de Zonas: PATCH & DELETE (2026-09-15):**
     *   Rutas `GET /api/zones/[id]`, `PATCH /api/zones/[id]` y `DELETE /api/zones/[id]` implementadas.
     *   Validación estricta de perfil activo (`is_active = true`) y control de rol (403 para `OPERATOR`).
@@ -469,8 +519,16 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   Salvaguarda forense de borrado físico (`?permanent=true` bloqueado con 409 ante alertas vinculadas).
     *   Trazabilidad forense con `ZONE_MODIFIED` y `ZONE_DELETED`.
     *   Suite ampliada a 61 tests automatizados (`scripts/test-bloqueantes.ts`).
-11. [ ] **Próximo Hito — Core Backend: Paquete B3 (Gestión de Viajeros y Terminales Hardware: El Rebaño):**
-    *   Alta de personal en terreno, credenciales criptográficas de dispositivo y ficha médica/contacto de emergencia.
+11. [x] **Core Backend — Paquete B3: Gestión de Viajeros y Terminales Hardware (2026-09-15):**
+    *   Rutas `GET /api/travelers`, `POST /api/travelers`, `GET /api/travelers/[id]`, `PATCH /api/travelers/[id]` y `DELETE /api/travelers/[id]` implementadas.
+    *   Enrolamiento criptográfico con generación de `device_secret` y almacenamiento exclusivo de `device_secret_hash` (nunca expuesto en lecturas).
+    *   Rotación de credenciales con auditoría tipada `TRAVELER_CREDENTIAL_ROTATED`.
+    *   Blindaje del campo `status` en PATCH para no eludir la lógica multi-incidente de B1.
+    *   Salvaguarda forense en DELETE frente al `ON DELETE CASCADE` de `alerts` (baja táctica por defecto, 409 ante alertas vinculadas).
+    *   Migración `sql/005_travelers_rls_policies.sql` para alinear RLS de UPDATE/DELETE con RBAC.
+    *   Suite ampliada a 80 tests automatizados (`scripts/test-bloqueantes.ts`).
+12. [ ] **Próximo Hito — Core Backend: Paquete B4 (Servicios Geoespaciales RPC Tácticos):**
+    *   Exposición de endpoints RPC PostGIS: `GET /api/geo/safe-haven` y `POST /api/geo/check-point`.
 
 ---
 

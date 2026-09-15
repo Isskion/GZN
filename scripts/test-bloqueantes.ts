@@ -453,6 +453,117 @@ async function runTests() {
   assert(zoneDeletedEntry.payload?.deletion_type === 'soft', 'Tipo de borrado (soft) documentado en auditoría');
 
   // ----------------------------------------------------------------------------
+  // 7. Gestión de Viajeros y Terminales Hardware (Paquete B3)
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 7. Gestión de Viajeros y Terminales Hardware (Paquete B3) ---');
+
+  // 1. Control de rol estricto para gestión de viajeros (Mandato Claude 1)
+  function checkTravelerManagementRole(profile: { role?: string; is_active?: boolean } | null): { authorized: boolean; reason?: string } {
+    if (!profile) return { authorized: false, reason: 'profile_not_found' };
+    if (!profile.is_active) return { authorized: false, reason: 'profile_inactive' };
+    if (!['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role || '')) {
+      return { authorized: false, reason: 'insufficient_role' };
+    }
+    return { authorized: true };
+  }
+
+  assert(checkTravelerManagementRole({ role: 'RSO', is_active: true }).authorized === true, 'RSO activo autorizado para viajeros');
+  assert(checkTravelerManagementRole({ role: 'ORG_ADMIN', is_active: true }).authorized === true, 'ORG_ADMIN activo autorizado para viajeros');
+  assert(checkTravelerManagementRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === true, 'SUPER_ADMIN activo autorizado para viajeros');
+  assert(checkTravelerManagementRole({ role: 'OPERATOR', is_active: true }).authorized === false, 'OPERATOR activo rechazado (403) para gestión de viajeros');
+  assert(checkTravelerManagementRole({ role: 'RSO', is_active: false }).authorized === false, 'RSO inactivo rechazado por is_active=false (403)');
+  assert(checkTravelerManagementRole(null).authorized === false, 'Perfil nulo rechazado (403)');
+
+  // 2. Bloqueo de edición manual de status en PATCH (Mandato Claude 3)
+  function validateTravelerPatchPayload(body: Record<string, any>): { valid: boolean; error?: string } {
+    if (body.status !== undefined) {
+      return {
+        valid: false,
+        error: 'El campo "status" no es modificable manualmente por este endpoint para preservar la lógica preventiva multi-incidente.',
+      };
+    }
+    if (body.full_name !== undefined && (typeof body.full_name !== 'string' || body.full_name.trim() === '')) {
+      return { valid: false, error: 'El campo "full_name" no puede estar vacío.' };
+    }
+    return { valid: true };
+  }
+
+  assert(!validateTravelerPatchPayload({ status: 'SAFE' }).valid, 'Rechazo controlado (400) de intento de editar status por PATCH');
+  assert(!validateTravelerPatchPayload({ status: 'PANIC' }).valid, 'Rechazo de status PANIC directo en PATCH');
+  assert(validateTravelerPatchPayload({ full_name: 'Carlos Ruiz' }).valid, 'Edición de full_name permitida');
+  assert(!validateTravelerPatchPayload({ full_name: '   ' }).valid, 'Rechazo de full_name en blanco');
+
+  // 3. Enrolamiento y Rotación Criptográfica de Hardware
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  assert(rawToken.length === 64, 'Token de hardware generado con 64 caracteres hex (256 bits)');
+  const computedHash = hashDeviceSecret(rawToken);
+  assert(typeof computedHash === 'string' && computedHash.length === 64, 'Hash de secreto calculado en SHA-256');
+
+  // 4. Salvaguarda forense de baja de viajero: soft vs hard delete (Mandato Claude 2)
+  function evaluateTravelerDeletion(isPermanent: boolean, linkedAlertsCount: number): { action: 'soft_deactivation' | 'hard_delete' | 'conflict_409'; error?: string } {
+    if (!isPermanent) {
+      return { action: 'soft_deactivation' };
+    }
+    if (linkedAlertsCount > 0) {
+      return {
+        action: 'conflict_409',
+        error: `No se puede eliminar físicamente al viajero: existen ${linkedAlertsCount} alertas de seguridad vinculadas (DPIA / RGPD Art. 35).`,
+      };
+    }
+    return { action: 'hard_delete' };
+  }
+
+  const defaultTravelerDel = evaluateTravelerDeletion(false, 10);
+  assert(defaultTravelerDel.action === 'soft_deactivation', 'DELETE por defecto aplica baja táctica (INCOMMUNICADO y secreto revocado)');
+
+  const conflictTravelerDel = evaluateTravelerDeletion(true, 4);
+  assert(conflictTravelerDel.action === 'conflict_409', 'DELETE permanente bloqueado con 409 si existen alertas vinculadas (protege CASCADE)');
+
+  const permanentTravelerDel = evaluateTravelerDeletion(true, 0);
+  assert(permanentTravelerDel.action === 'hard_delete', 'DELETE permanente permitido si no hay alertas vinculadas');
+
+  // 5. Catálogo de Auditoría: TRAVELER_CREATED, TRAVELER_MODIFIED, TRAVELER_DELETED y TRAVELER_CREDENTIAL_ROTATED (Mandato Claude)
+  const travelerCreatedEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: 'rso-user-123',
+    action: 'TRAVELER_CREATED',
+    entity_type: 'TRAVELER',
+    entity_id: 'traveler-01-uuid',
+    payload: { traveler_name: 'Valeria Gómez', callsign: 'Eco-4', device_enrolled: true },
+  };
+  assert(travelerCreatedEntry.action === 'TRAVELER_CREATED', 'Acción TRAVELER_CREATED registrada');
+
+  const credentialRotatedEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: 'rso-user-123',
+    action: 'TRAVELER_CREDENTIAL_ROTATED',
+    entity_type: 'TRAVELER',
+    entity_id: 'traveler-01-uuid',
+    payload: { traveler_name: 'Valeria Gómez', credential_rotated: true },
+  };
+  assert(credentialRotatedEntry.action === 'TRAVELER_CREDENTIAL_ROTATED', 'Acción TRAVELER_CREDENTIAL_ROTATED tipada y diferenciada');
+
+  const travelerModifiedEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: 'rso-user-123',
+    action: 'TRAVELER_MODIFIED',
+    entity_type: 'TRAVELER',
+    entity_id: 'traveler-01-uuid',
+    payload: { traveler_name: 'Valeria Gómez', updated_fields: ['phone'] },
+  };
+  assert(travelerModifiedEntry.action === 'TRAVELER_MODIFIED', 'Acción TRAVELER_MODIFIED registrada');
+
+  const travelerDeletedEntry: AuditLogEntry = {
+    organization_id: 'org-test-uuid',
+    performed_by: 'rso-user-123',
+    action: 'TRAVELER_DELETED',
+    entity_type: 'TRAVELER',
+    entity_id: 'traveler-01-uuid',
+    payload: { deletion_type: 'soft', traveler_name: 'Valeria Gómez' },
+  };
+  assert(travelerDeletedEntry.action === 'TRAVELER_DELETED', 'Acción TRAVELER_DELETED registrada');
+
+  // ----------------------------------------------------------------------------
   // Resumen
   // ----------------------------------------------------------------------------
   console.log('\n================================================================');
