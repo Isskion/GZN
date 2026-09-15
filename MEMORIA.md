@@ -497,9 +497,9 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *Decisión:* Establecimiento de la infraestructura de control de versiones, integración continua y despliegue del proyecto:
     1. **Estructura Git de Doble Rama:** Adopción del flujo estándar `main` (producción estable) y `develop` (integración y desarrollo activo). Ningún cambio se mergea o pushea directamente sin pasar por el ciclo agéntico y la aprobación humana.
     2. **Regla de Oro Agéntica en Git:** Se ratifica que **ningún `git push` a `main` o `develop` se ejecuta sin el previo informe de entrega en `intercambio/desde-gemini/`, el veredicto favorable de Claude en `intercambio/desde-claude/` y la aprobación explícita de Daniel**. El paso del CI técnico es condición necesaria pero no suficiente.
-    3. **Quality Gate Automatizado (GitHub Actions CI):** Configuración de `.github/workflows/ci.yml` ejecutado en Node 22 y pnpm v10 sobre ramas `main` y `develop`. El flujo valida `pnpm install --frozen-lockfile`, `pnpm build` (que ejecuta el chequeo de tipos TypeScript y el linter nativo de Next.js sin dependencias interactivas externas) y la suite completa de 132 tests automatizados (`pnpm test`).
+    3. **Quality Gate Automatizado (GitHub Actions CI):** Configuración de `.github/workflows/ci.yml` ejecutado en Node 22 y pnpm v10 sobre ramas `main` y `develop`. El flujo valida `pnpm install --frozen-lockfile`, `pnpm build` (valida tipos de TypeScript; el linting de estilo ESLint queda pendiente de configurar y no se ejecuta actualmente en ningún paso) y la suite completa de 132 tests automatizados (`pnpm test`).
     4. **Higiene de Despliegue (`.vercelignore`):** Aislamiento estricto en despliegues de producción, excluyendo de los builds de Vercel la carpeta de gobernanza `/intercambio/`, la documentación interna `MEMORIA.md`, los scripts de pruebas `scripts/`, las migraciones SQL locales `sql/` y la configuración interna `.github/`.
-    5. **Vinculación a Vercel:** Proyecto enlazado bajo la organización `isskions-projects` con el proyecto `gzn` para hosting serverless de la consola RSO y los endpoints del Core Backend.
+    5. **Vinculación a Vercel:** Proyecto a enlazar bajo el equipo `isskions-projects` con el proyecto `gzn` para hosting serverless de la consola RSO y los endpoints del Core Backend tras la aprobación de despliegue.
 
 ---
 
