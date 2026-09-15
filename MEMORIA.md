@@ -493,6 +493,14 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     5. **Trazabilidad DPIA Completa:** Incorporación de las acciones tipadas `BRIEFING_CREATED`, `BRIEFING_MODIFIED` y `BRIEFING_DELETED` en `AuditAction`.
     6. **Cobertura 100% del Esquema DDL y Suite de 132 Tests:** Todas las entidades del modelo relacional cuentan con endpoints y salvaguardas verificadas, alcanzando **132/132 pruebas exitosas** en `scripts/test-bloqueantes.ts`.
 
+*   **ADR-015 (2026-09-15): Estructura Git de Doble Rama, Quality Gate CI y Despliegue en Vercel.**  
+    *Decisión:* Establecimiento de la infraestructura de control de versiones, integración continua y despliegue del proyecto:
+    1. **Estructura Git de Doble Rama:** Adopción del flujo estándar `main` (producción estable) y `develop` (integración y desarrollo activo). Ningún cambio se mergea o pushea directamente sin pasar por el ciclo agéntico y la aprobación humana.
+    2. **Regla de Oro Agéntica en Git:** Se ratifica que **ningún `git push` a `main` o `develop` se ejecuta sin el previo informe de entrega en `intercambio/desde-gemini/`, el veredicto favorable de Claude en `intercambio/desde-claude/` y la aprobación explícita de Daniel**. El paso del CI técnico es condición necesaria pero no suficiente.
+    3. **Quality Gate Automatizado (GitHub Actions CI):** Configuración de `.github/workflows/ci.yml` ejecutado en Node 22 y pnpm v10 sobre ramas `main` y `develop`. El flujo valida `pnpm install --frozen-lockfile`, `pnpm build` (que ejecuta el chequeo de tipos TypeScript y el linter nativo de Next.js sin dependencias interactivas externas) y la suite completa de 132 tests automatizados (`pnpm test`).
+    4. **Higiene de Despliegue (`.vercelignore`):** Aislamiento estricto en despliegues de producción, excluyendo de los builds de Vercel la carpeta de gobernanza `/intercambio/`, la documentación interna `MEMORIA.md`, los scripts de pruebas `scripts/`, las migraciones SQL locales `sql/` y la configuración interna `.github/`.
+    5. **Vinculación a Vercel:** Proyecto enlazado bajo la organización `isskions-projects` con el proyecto `gzn` para hosting serverless de la consola RSO y los endpoints del Core Backend.
+
 ---
 
 ## 8. Estado de Implementación y Próximos Sprints
@@ -563,7 +571,12 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   Control RBAC riguroso para mutaciones (restringido a `RSO` y Administradores activos, 403 para `OPERATOR`).
     *   Auditoría DPIA ampliada con `BRIEFING_CREATED`, `BRIEFING_MODIFIED` y `BRIEFING_DELETED`.
     *   Suite ampliada a 132 tests automatizados (`scripts/test-bloqueantes.ts`).
-14. [ ] **Próximo Hito — Movilidad / Aplicación Móvil (Sprint 11):**
+14. [x] **Infraestructura Git, CI/CD y Vercel (2026-09-15):**
+    *   Estructura Git de doble rama (`main` y `develop`) y gobernanza de push blindada por veredicto agéntico.
+    *   Workflow de GitHub Actions `.github/workflows/ci.yml` configurado con compilación Next.js y suite de 132 tests automatizados.
+    *   Filtro `.vercelignore` para higiene del bundle de producción y protección de artefactos internos.
+    *   Script `"test": "npx tsx scripts/test-bloqueantes.ts"` integrado en `package.json`.
+15. [ ] **Próximo Hito — Movilidad / Aplicación Móvil (Sprint 11):**
     *   Desarrollo de la aplicación móvil de campo (Flutter / React Native) conectada a la infraestructura backend y sus endpoints autenticados.
 
 ---
