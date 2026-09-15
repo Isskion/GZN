@@ -22,6 +22,10 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') || 'OPEN';
+    const severity = searchParams.get('severity');
+    const travelerId = searchParams.get('traveler_id');
+    const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '50', 10) || 50, 1), 100);
+    const offset = Math.max(parseInt(searchParams.get('offset') || '0', 10) || 0, 0);
 
     // RLS filtra automáticamente por la organización del usuario en sesión
     let query = supabase
@@ -37,15 +41,28 @@ export async function GET(request: NextRequest) {
         longitude,
         memo,
         status,
+        resolved_by,
+        resolved_at,
         created_at,
         travelers (id, full_name, callsign, phone, battery_level),
-        zones (id, name, severity, color_hex)
+        zones (id, name, severity, color_hex),
+        resolver:profiles!resolved_by (id, full_name, role)
       `)
       .order('created_at', { ascending: false });
 
     if (status !== 'ALL') {
       query = query.eq('status', status);
     }
+
+    if (severity && ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(severity.toUpperCase())) {
+      query = query.eq('severity', severity.toUpperCase());
+    }
+
+    if (travelerId) {
+      query = query.eq('traveler_id', travelerId);
+    }
+
+    query = query.range(offset, offset + limit - 1);
 
     const { data: alerts, error } = await query;
 

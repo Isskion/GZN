@@ -404,6 +404,15 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     4. **Trazabilidad en Incursiones Espaciales (`POST /api/telemetry`):** Se registra `ZONE_VIOLATION_DETECTED` automáticamente cuando PostGIS detecta penetración en zona roja, archivando coordenadas, velocidad satelital y nivel de batería.
     5. **Inmutabilidad y Garantías Forenses:** Garantizada a nivel de aplicación frente a usuarios autenticados mediante las políticas RLS de `audit_logs` (solo `INSERT` y `SELECT`; sin `UPDATE` ni `DELETE` para usuarios finales, operadores o RSO). Se reconoce la distinción técnica inherente a PostgreSQL/Supabase donde la clave de infraestructura `service_role` tiene capacidad de bypass de RLS para tareas de mantenimiento y migraciones internas.
 
+*   **ADR-010 (2026-09-15): Gestión del Ciclo de Vida de Alertas: Resolución Forense y Lógica Preventiva Multi-Incidente.**  
+    *Decisión:* Implementación del Paquete B1 del Core Backend GZN:
+    1. **Rutas RESTful Dinámicas (`/api/alerts/[id]`):** Se implementan `GET` (detalle forense individual con joins a viajero, zona y perfil de resolución) y `PATCH` (transiciones de estado y enriquecimiento táctico de observaciones en `memo`).
+    2. **Control de Acceso y RBAC:** Autenticación estricta por sesión web (`getAuthenticatedSession`). Conforme a la matriz aprobada en ADR-007 y RLS vigente (`sql/002_rls_security_policies.sql`), se habilita a los operadores de sala (`OPERATOR`) para la gestión, triaje y cierre operativo de alertas (`ACKNOWLEDGED`, `INVESTIGATING`, `RESOLVED`, `FALSE_ALARM`).
+    3. **Firma Forense de Cierre:** En transiciones a `RESOLVED` y `FALSE_ALARM`, se estampa automáticamente `resolved_by = auth.uid()` y `resolved_at = NOW()`. En caso de reapertura operativa a `OPEN`, se resetean ambos campos a `NULL`.
+    4. **Lógica Preventiva Multi-Incidente (Mandato Auditoría Claude):** Al resolver o marcar como falsa alarma una alerta (`reset_traveler_status: true`), el sistema consulta obligatoriamente si el mismo viajero (`traveler_id`) mantiene OTRAS alertas activas (`OPEN`, `ACKNOWLEDGED`, `INVESTIGATING`). Si persisten otros incidentes, el estado del viajero en `public.travelers` permanece intacto (ej. `PANIC` o `DANGER`). Solo cuando la totalidad de alertas abiertas ha sido mitigada, el estado del viajero se normaliza a `SAFE`.
+    5. **Trazabilidad Forense Ampliada (ADR-009):** Se añade `ALERT_STATUS_CHANGED` al catálogo de `AuditAction` para registrar transiciones intermedias o reaperturas, complementando a `ALERT_ACKNOWLEDGED` y `ALERT_RESOLVED` con payload auditado que incluye `traveler_status_reset` y `reset_reason`.
+    6. **Ampliación de Listado (`GET /api/alerts`):** Soporte de filtros por `status`, `severity`, `traveler_id` y paginación (`limit`, `offset`) con join a `profiles:resolved_by`.
+
 ---
 
 ## 8. Estado de Implementación y Próximos Sprints
@@ -439,10 +448,14 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
    *   Firebase formalizado exclusivamente como pasarela de notificaciones push prioritarias (FCM vía Firebase Admin SDK).
    *   ADR-001 corregido eliminando referencias a colecciones no implementadas de Firestore.
    *   Documentación de limitaciones conocidas (MultiPolygon, APNs Critical Alerts y maqueta de consola) incorporada en Sección 9.
-9. [ ] **Próximo Hito — Despliegue en Producción y Vinculación en Vercel:**
-   *   Superar checklist final de auditoría de Claude en `intercambio/desde-claude/`.
-   *   Configuración de variables de entorno de producción en Vercel y Supabase.
-   *   Conexión de la consola web reactiva MapLibre con las rutas API reales.
+9. [x] **Core Backend — Paquete B1: Gestión del Ciclo de Vida de Alertas (2026-09-15):**
+   *   Rutas `GET /api/alerts/[id]` y `PATCH /api/alerts/[id]` creadas.
+   *   Lógica Multi-Incidente implementada: bloqueo de reset a `SAFE` de viajero si persisten otras alertas activas.
+   *   Filtros (`status`, `severity`, `traveler_id`) y paginación en `GET /api/alerts`.
+   *   Acción `ALERT_STATUS_CHANGED` en `AuditAction` y trazabilidad forense completa.
+   *   Suite ampliada a 45 tests automatizados (`scripts/test-bloqueantes.ts`).
+10. [ ] **Próximo Hito — Core Backend: Paquete B2 (Gestión Completa de Zonas: PATCH & DELETE):**
+    *   Actualización y desactivación controlada de perímetros de riesgo por oficiales RSO.
 
 ---
 

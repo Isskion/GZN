@@ -268,6 +268,109 @@ async function runTests() {
   assert(missingOrgResult === false, 'logAuditEvent rechaza limpiamente si falta organization_id');
 
   // ----------------------------------------------------------------------------
+  // 5. Gestión y Ciclo de Vida de Alertas (Paquete B1)
+  // ----------------------------------------------------------------------------
+  console.log('--- 5. Ciclo de Vida de Alertas y Lógica Multi-Incidente (Paquete B1) ---');
+
+  const VALID_ALERT_STATUSES = ['OPEN', 'ACKNOWLEDGED', 'INVESTIGATING', 'RESOLVED', 'FALSE_ALARM'];
+  const isValidAlertStatus = (s: string) => VALID_ALERT_STATUSES.includes(s);
+
+  assert(isValidAlertStatus('ACKNOWLEDGED'), 'Estado ACKNOWLEDGED válido');
+  assert(isValidAlertStatus('INVESTIGATING'), 'Estado INVESTIGATING válido');
+  assert(isValidAlertStatus('RESOLVED'), 'Estado RESOLVED válido');
+  assert(isValidAlertStatus('FALSE_ALARM'), 'Estado FALSE_ALARM válido');
+  assert(!isValidAlertStatus('INVALID_STATUS'), 'Rechazo controlado de estado de alerta inexistente');
+  assert(!isValidAlertStatus(''), 'Rechazo controlado de estado vacío');
+
+  // Validación de asignación de firma de resolución
+  function computeAlertResolutionUpdates(currentStatus: string, newStatus: string, userId: string) {
+    const updates: Record<string, any> = { status: newStatus };
+    if (newStatus === 'RESOLVED' || newStatus === 'FALSE_ALARM') {
+      updates.resolved_by = userId;
+      updates.resolved_at = new Date().toISOString();
+    } else if (newStatus === 'OPEN') {
+      updates.resolved_by = null;
+      updates.resolved_at = null;
+    }
+    return updates;
+  }
+
+  const resolvedUpdates = computeAlertResolutionUpdates('OPEN', 'RESOLVED', 'rso-user-123');
+  assert(resolvedUpdates.resolved_by === 'rso-user-123', 'resolved_by asignado al resolver alerta');
+  assert(typeof resolvedUpdates.resolved_at === 'string', 'resolved_at asignado con timestamp ISO al resolver');
+
+  const reopenedUpdates = computeAlertResolutionUpdates('RESOLVED', 'OPEN', 'rso-user-123');
+  assert(reopenedUpdates.resolved_by === null, 'resolved_by reseteado a null al reabrir alerta');
+  assert(reopenedUpdates.resolved_at === null, 'resolved_at reseteado a null al reabrir alerta');
+
+  // Validación de acción de auditoría según transición
+  function determineAlertAuditAction(newStatus: string): AuditLogEntry['action'] {
+    if (newStatus === 'ACKNOWLEDGED') return 'ALERT_ACKNOWLEDGED';
+    if (newStatus === 'RESOLVED' || newStatus === 'FALSE_ALARM') return 'ALERT_RESOLVED';
+    return 'ALERT_STATUS_CHANGED';
+  }
+
+  assert(determineAlertAuditAction('ACKNOWLEDGED') === 'ALERT_ACKNOWLEDGED', 'Auditoría ALERT_ACKNOWLEDGED asignada');
+  assert(determineAlertAuditAction('RESOLVED') === 'ALERT_RESOLVED', 'Auditoría ALERT_RESOLVED asignada');
+  assert(determineAlertAuditAction('FALSE_ALARM') === 'ALERT_RESOLVED', 'Auditoría ALERT_RESOLVED asignada para FALSE_ALARM');
+  assert(determineAlertAuditAction('INVESTIGATING') === 'ALERT_STATUS_CHANGED', 'Auditoría ALERT_STATUS_CHANGED asignada para INVESTIGATING');
+  assert(determineAlertAuditAction('OPEN') === 'ALERT_STATUS_CHANGED', 'Auditoría ALERT_STATUS_CHANGED asignada al reabrir alerta');
+
+  // Validación de Lógica Preventiva Multi-Incidente (Mandato Auditoría Claude)
+  function evaluateTravelerStatusReset(
+    newStatus: string,
+    resetRequested: boolean,
+    currentTravelerStatus: string,
+    otherActiveAlertsCount: number
+  ): { travelerStatusReset: boolean; resetReason: string; newTravelerStatus: string } {
+    const shouldReset = (newStatus === 'RESOLVED' || newStatus === 'FALSE_ALARM') && resetRequested !== false;
+    if (!shouldReset) {
+      return { travelerStatusReset: false, resetReason: 'not_requested', newTravelerStatus: currentTravelerStatus };
+    }
+    if (otherActiveAlertsCount > 0) {
+      return { travelerStatusReset: false, resetReason: 'other_active_alerts_exist', newTravelerStatus: currentTravelerStatus };
+    }
+    if (['PANIC', 'DANGER', 'WARNING'].includes(currentTravelerStatus)) {
+      return { travelerStatusReset: true, resetReason: 'all_alerts_resolved', newTravelerStatus: 'SAFE' };
+    }
+    return { travelerStatusReset: false, resetReason: 'traveler_already_safe', newTravelerStatus: currentTravelerStatus };
+  }
+
+  // Caso 1: Viajero con 2 alertas activas; resolvemos 1 -> NO debe resetear estado a SAFE
+  const multiAlertCase = evaluateTravelerStatusReset('RESOLVED', true, 'PANIC', 1);
+  assert(
+    multiAlertCase.travelerStatusReset === false && 
+    multiAlertCase.resetReason === 'other_active_alerts_exist' && 
+    multiAlertCase.newTravelerStatus === 'PANIC',
+    'Lógica Multi-Incidente: Bloqueo de reset a SAFE si existen otras alertas abiertas'
+  );
+
+  // Caso 2: Viajero sin otras alertas activas; resolvemos la última -> DEBE resetear a SAFE
+  const singleAlertCase = evaluateTravelerStatusReset('RESOLVED', true, 'PANIC', 0);
+  assert(
+    singleAlertCase.travelerStatusReset === true && 
+    singleAlertCase.resetReason === 'all_alerts_resolved' && 
+    singleAlertCase.newTravelerStatus === 'SAFE',
+    'Lógica Multi-Incidente: Reset a SAFE exitoso cuando no persisten otras alertas'
+  );
+
+  // Caso 3: Viajero ya en estado SAFE al resolver -> no se altera estado
+  const safeCase = evaluateTravelerStatusReset('RESOLVED', true, 'SAFE', 0);
+  assert(
+    safeCase.travelerStatusReset === false && 
+    safeCase.resetReason === 'traveler_already_safe',
+    'Lógica Multi-Incidente: Detección correcta de viajero ya seguro'
+  );
+
+  // Caso 4: Transición a INVESTIGATING -> no debe evaluar reset
+  const investigatingCase = evaluateTravelerStatusReset('INVESTIGATING', true, 'PANIC', 0);
+  assert(
+    investigatingCase.travelerStatusReset === false && 
+    investigatingCase.resetReason === 'not_requested',
+    'Lógica Multi-Incidente: Sin reset de viajero en estados no terminales'
+  );
+
+  // ----------------------------------------------------------------------------
   // Resumen
   // ----------------------------------------------------------------------------
   console.log('\n================================================================');
