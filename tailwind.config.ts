@@ -8,17 +8,34 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        heading: ["var(--font-heading)", "system-ui", "sans-serif"],
+        body: ["var(--font-body)", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
+      },
       colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+        background: "var(--color-bg)",
+        foreground: "var(--color-text)",
+        industry: {
+          bg: "var(--color-bg)",
+          surface: "var(--color-surface)",
+          text: "var(--color-text)",
+          accent: "var(--color-accent)",
+          divider: "var(--color-divider)",
+          crit: "var(--risk-crit)",
+          high: "var(--risk-high)",
+          watch: "var(--risk-watch)",
+          stable: "var(--risk-stable)",
+          neutral: "var(--risk-neutral)",
+        },
         gzn: {
           dark: "#0F172A",
           card: "#1E293B",
           border: "#334155",
-          red: "#EF4444",
-          amber: "#F59E0B",
-          green: "#10B981",
-          blue: "#3B82F6",
+          red: "var(--risk-crit)",
+          amber: "var(--risk-high)",
+          green: "var(--risk-stable)",
+          blue: "var(--risk-watch)",
         }
       },
     },

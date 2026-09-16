@@ -603,10 +603,22 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   Interacción táctica completa con vuelo (`flyTo`) y apertura de popups al pulsar sobre viajeros o zonas.
     *   Variables de entorno documentadas en `.env.local` y `.env.local.example` (`NEXT_PUBLIC_HERE_API_KEY`).
     *   Suite de pruebas automatizadas ampliada a 155 tests (`scripts/test-bloqueantes.ts`) con 100% de éxito y build Next.js verificado (1581ms).
-16. [ ] **Próximo Hito — Consola Web RSO: Conexión de Datos Reales y Autenticación Staff (Módulos 1, 3, 4 y 5):**
-    *   Sustitución de estados mock locales en `src/app/page.tsx` por llamadas a endpoints de backend (`GET /api/zones`, `GET /api/travelers`, `GET /api/alerts`).
+16. [x] **Consola Web RSO — Adopción del Sistema de Diseño "Industry" y Nuevas Pantallas (2026-09-16):**
+    *   Adopción íntegra del sistema de diseño **"Industry"**: estética *Blueprint* de ingeniería, paneles técnicos con marcas de cruz de 1px en las cuatro esquinas (`.blueprint > .corner.tl/tr/bl/br`), esquinas rectilíneas y cero radios exagerados.
+    *   Tokens de diseño OKLCH integrados en `globals.css` y `tailwind.config.ts`: soporte conmutable en caliente entre variante nocturna táctica **`sala`** (`data-dir="sala"`, tema oscuro por defecto `#1d2d3d`, superficies `#2c455d`, texto `#eef2f6`) y **`mesa`** (tema claro de mesa de luz `#f2f2f3`).
+    *   Paleta de severidad y riesgo adaptativa de alto contraste: calibrada específicamente para `sala` (`--risk-crit: #e07a6a; --risk-high: #d8a84f; --risk-watch: #94bce3; --risk-stable: #63b598; --risk-neutral: #98989b`) y para `mesa` (`--risk-crit: #a33f31; --risk-high: #a5762d; --risk-watch: #5980a6; --risk-stable: #2f7a62; --risk-neutral: #7a7a7d`), garantizando legibilidad inmediata de alertas e inclusión de estado neutro para `INCOMMUNICADO`.
+    *   Tipografía táctica: `Barlow Condensed` (encabezados y kickers, peso 600) + `Barlow` (cuerpo de operaciones) + `IBM Plex Mono` (coordenadas WGS84, timestamps UTC y batería). Trazo fino uniforme en iconos Lucide fijado en `stroke-width: 1.5`.
+    *   Shell orquestador modular (`src/app/page.tsx`): barra superior `ConsoleHeader` (52px con logo GZN, reloj UTC continuo, selector Sala/Mesa y pill de alertas) y rail vertical `ConsoleRail` (56px fijo a la izquierda con tooltips técnicos flotantes).
+    *   Pantalla **Terreno** (`src/components/screens/TerrenoScreen.tsx`): Reskin completo de la consola táctica HERE v3 (Módulo 2), manteniendo `TacticalLayerSelector`, `TacticalHud`, polígonos GeoJSON, geofencing y simulaciones de intrusión y pánico, adoptando los paneles técnicos "En el sector", "Zonas y perímetros" y "Log de campo".
+    *   Pantalla **Personas** (`src/components/screens/PersonasScreen.tsx`): Primera pantalla funcional nueva conectada a la API real `GET /api/travelers` (Paquete B3), con filtros por severidad y batería baja, tabla Blueprint (con columna de destino reflejada estrictamente como "N/D" en cumplimiento del mandato OpSec para evitar datos ficticios) y panel lateral deslizable `TravelerDrawer` para ficha técnica y acciones de check-in.
+    *   Pantalla **Situación** (`src/components/screens/SituacionScreen.tsx`): Maqueta visual de situación macroestratégica con KPIs globales, teatros territoriales y cinta horizontal de teletipo `IncidentTape`.
+    *   Pantalla **Mensajes** (`src/components/screens/MensajesScreen.tsx`): Maqueta visual para composición de boletines tácticos, plantillas operativas (toque de queda, evacuación) y previsualizador en terminal móvil seguro, explícitamente sin backend de emisión masiva (fuera de MVP).
+    *   Componente `IncidentModal`: Modal de triaje táctico ante alertas críticas con checklist de protocolo escalonado SOP-04 con tiempos de intervención estimados (`T+0m`, `T+2m`, `T+5m`, etc.).
+    *   Compilación de producción Next.js 15.5 (`pnpm build`) verificada exitosamente en 3.7s con cero errores de tipado o linting.
+17. [ ] **Próximo Hito — Consola Web RSO: Conexión de Datos Reales y Autenticación Staff (Módulos 1, 3, 4 y 5):**
+    *   Sustitución de estados mock locales en `TerrenoScreen` por llamadas a endpoints de backend (`GET /api/zones`, `GET /api/alerts`).
     *   Herramienta de dibujo interactivo de zonas tácticas (`POST /api/zones`) y triaje de alertas (`PATCH /api/alerts/[id]`).
-17. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
+18. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
     *   Desarrollo de la aplicación móvil de campo (Flutter / React Native) conectada a la infraestructura backend y sus endpoints autenticados.
 
 ---
