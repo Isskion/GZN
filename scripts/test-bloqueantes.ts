@@ -18,6 +18,12 @@ import {
   hasScreenAccess,
   UserRole,
 } from '../src/types/database';
+import {
+  generateGeodesicCircle,
+  extractMainContinentPolygon,
+  closeDrawnPolygon,
+  calculateRingAreaKm2,
+} from '../src/lib/geo/tactical-zones';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -940,8 +946,72 @@ async function runTests() {
   assert(wordmarkContent.includes('GREEN ZONE NAVIGATOR'), 'Wordmark incluye subtítulo oficial GREEN ZONE NAVIGATOR');
 
   // ----------------------------------------------------------------------------
-  // Resumen
+  // 13. Creación de Zonas Tácticas y Autorización de Roles (Migración 010)
   // ----------------------------------------------------------------------------
+  console.log('\n--- 13. Creación de Zonas Tácticas y Autorización de Roles (Migración 010) ---');
+
+  // Función de evaluación de autorización para create_zone_with_geojson (role_level >= 60)
+  function evaluateZoneCreationAuth(profile: { role_level?: number; is_active?: boolean } | null): { authorized: boolean; httpStatus: number } {
+    if (!profile) return { authorized: false, httpStatus: 401 };
+    if (!profile.is_active) return { authorized: false, httpStatus: 403 };
+    if ((profile.role_level ?? 0) < 60) return { authorized: false, httpStatus: 403 };
+    return { authorized: true, httpStatus: 201 };
+  }
+
+  assert(evaluateZoneCreationAuth({ role_level: 100, is_active: true }).authorized === true, 'ORG_ADMIN (100) autorizado para crear zonas');
+  assert(evaluateZoneCreationAuth({ role_level: 80, is_active: true }).authorized === true, 'CONTROL_TOWER (80) autorizado para crear zonas (Mandato Claude)');
+  assert(evaluateZoneCreationAuth({ role_level: 60, is_active: true }).authorized === true, 'RSO (60) autorizado para crear zonas');
+  assert(evaluateZoneCreationAuth({ role_level: 40, is_active: true }).authorized === false, 'OPERATOR (40) rechazado (403) para crear zonas');
+  assert(evaluateZoneCreationAuth({ role_level: 80, is_active: false }).authorized === false, 'CONTROL_TOWER inactivo rechazado por is_active=false');
+  assert(evaluateZoneCreationAuth(null).authorized === false, 'Usuario sin sesión rechazado (401)');
+
+  // Modalidad A: Extracción de polígono continental principal desde MultiPolygon
+  const mockSimplePoly: GeoJSON.Polygon = {
+    type: 'Polygon',
+    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+  };
+  const extractedSimple = extractMainContinentPolygon(mockSimplePoly);
+  assert(extractedSimple !== null, 'Extracción de Polygon simple exitosa');
+  assert(extractedSimple?.isSimplified === false, 'Polygon simple marcado como no simplificado');
+  assert(extractedSimple?.excludedCount === 0, 'Polygon simple tiene 0 enclaves excluidos');
+  assert(validateGeoJSONPolygon(extractedSimple?.polygon).valid === true, 'Polygon simple pasa validación GeoJSON');
+
+  const mockMultiPoly: GeoJSON.MultiPolygon = {
+    type: 'MultiPolygon',
+    coordinates: [
+      // Isla pequeña (área pequeña)
+      [[[10, 10], [10.1, 10], [10.1, 10.1], [10, 10.1], [10, 10]]],
+      // Continente grande (área dominante)
+      [[[0, 0], [5, 0], [5, 5], [0, 5], [0, 0]]],
+    ],
+  };
+  const extractedMulti = extractMainContinentPolygon(mockMultiPoly);
+  assert(extractedMulti !== null, 'Extracción de MultiPolygon exitosa');
+  assert(extractedMulti?.polygon.type === 'Polygon', 'MultiPolygon convertido estrictamente a Polygon');
+  assert(extractedMulti?.isSimplified === true, 'MultiPolygon marcado como simplificado para aviso de interfaz');
+  assert(extractedMulti?.excludedCount === 1, 'MultiPolygon registra exactamente 1 enclave excluido');
+  assert(validateGeoJSONPolygon(extractedMulti?.polygon).valid === true, 'Polígono continental extraído pasa validación GeoJSON');
+
+  // Modalidad B: Generación de buffer circular geodésico (64 vértices en WGS84)
+  const circlePoly = generateGeodesicCircle(3.7038, 40.4168, 15, 64);
+  assert(circlePoly.type === 'Polygon', 'Buffer circular generado es de tipo Polygon');
+  assert(circlePoly.coordinates[0].length === 65, 'Buffer circular contiene exactamente 65 coordenadas (64 + cierre)');
+  const firstCoord = circlePoly.coordinates[0][0];
+  const lastCoord = circlePoly.coordinates[0][circlePoly.coordinates[0].length - 1];
+  assert(firstCoord[0] === lastCoord[0] && firstCoord[1] === lastCoord[1], 'Buffer circular geodésico está cerrado (primero = último)');
+  assert(validateGeoJSONPolygon(circlePoly).valid === true, 'Buffer circular pasa validación GeoJSON Polygon RFC 7946');
+
+  // Modalidad C: Cierre de polígono trazado interactivamente
+  const unclosedDrawnPoints: [number, number][] = [
+    [-3.70, 40.41],
+    [-3.69, 40.42],
+    [-3.68, 40.40],
+  ];
+  const closedDrawnPoly = closeDrawnPolygon(unclosedDrawnPoints);
+  assert(closedDrawnPoly !== null, 'Polígono trazado cerrado exitosamente');
+  assert(closedDrawnPoly?.type === 'Polygon', 'Polígono trazado es de tipo Polygon');
+  assert(closedDrawnPoly?.coordinates[0].length === 4, 'Polígono trazado de 3 puntos expandido a 4 coordenadas cerradas');
+  assert(validateGeoJSONPolygon(closedDrawnPoly).valid === true, 'Polígono trazado pasa validación GeoJSON');
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);
   console.log('================================================================\n');

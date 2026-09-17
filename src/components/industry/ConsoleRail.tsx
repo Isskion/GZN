@@ -24,7 +24,7 @@ const NAV_ITEMS: { id: ScreenId; label: string; icon: React.ComponentType<{ clas
 export const ConsoleRail: React.FC<ConsoleRailProps> = ({
   activeScreen,
   onSelectScreen,
-  currentRole = 'ORG_ADMIN',
+  currentRole = 'OPERATOR',
   screenAccess,
 }) => {
   const visibleNavItems = NAV_ITEMS.filter((item) =>

@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     // Consulta con cliente de sesión: RLS filtra automáticamente por la organización del usuario
     const { data: zones, error } = await supabase
       .from('zones')
-      .select('id, organization_id, name, description, severity, color_hex, buffer_meters, is_curfew, curfew_start, curfew_end, contact_phone, radio_frequency, gate_access_protocol, valid_from, valid_until, is_active, created_at, geom')
+      .select('id, organization_id, assigned_rso_id, name, description, severity, color_hex, buffer_meters, is_curfew, curfew_start, curfew_end, contact_phone, radio_frequency, gate_access_protocol, valid_from, valid_until, is_active, created_at, geom')
       .eq('is_active', true);
 
     if (error) {
@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
           properties: {
             id: zone.id,
             organization_id: zone.organization_id,
+            assigned_rso_id: zone.assigned_rso_id ?? null,
             name: zone.name,
             description: zone.description,
             severity: zone.severity,
@@ -105,6 +106,7 @@ export async function POST(request: NextRequest) {
       contact_phone,
       radio_frequency,
       gate_access_protocol,
+      assigned_rso_id,
     } = body;
 
     // Validación de campos obligatorios
@@ -173,6 +175,7 @@ export async function POST(request: NextRequest) {
       p_contact_phone: contact_phone ? String(contact_phone).trim() : null,
       p_radio_frequency: radio_frequency ? String(radio_frequency).trim() : null,
       p_gate_access_protocol: gate_access_protocol ? String(gate_access_protocol).trim() : null,
+      p_assigned_rso_id: assigned_rso_id || null,
     });
 
     if (error) {
@@ -193,6 +196,7 @@ export async function POST(request: NextRequest) {
       payload: {
         name: data.name,
         severity: data.severity,
+        assigned_rso_id: data.assigned_rso_id || null,
         buffer_meters: data.buffer_meters,
         is_curfew: data.is_curfew,
         curfew_start: data.curfew_start,

@@ -21,13 +21,20 @@ import { TacticalLayerSelector } from '@/components/map/TacticalLayerSelector';
 import { TacticalHud } from '@/components/map/TacticalHud';
 import { BlueprintPlate } from '@/components/industry/BlueprintPlate';
 
-interface ZoneItem {
+export interface ZoneItem {
   id: string;
   name: string;
-  severity: 'RED' | 'AMBER' | 'SAFE_HAVEN';
+  severity: 'RED' | 'AMBER' | 'SAFE_HAVEN' | 'CORRIDOR';
   color: string;
   description?: string;
   center?: [number, number];
+  buffer_meters?: number;
+  is_curfew?: boolean;
+  curfew_start?: string | null;
+  curfew_end?: string | null;
+  contact_phone?: string | null;
+  radio_frequency?: string | null;
+  gate_access_protocol?: string | null;
 }
 
 interface TravelerItem {
@@ -43,9 +50,17 @@ interface TravelerItem {
 
 interface TerrenoScreenProps {
   onAlertTriggered?: (count: number) => void;
+  canManageZones?: boolean;
+  onOpenCreateZone?: () => void;
+  refreshTrigger?: number;
 }
 
-export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({ onAlertTriggered }) => {
+export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
+  onAlertTriggered,
+  canManageZones = false,
+  onOpenCreateZone,
+  refreshTrigger = 0,
+}) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<{ [key: string]: maplibregl.Marker }>({});
@@ -105,32 +120,83 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({ onAlertTriggered }
     },
   ]);
 
-  const zones: ZoneItem[] = [
-    {
-      id: 'z-01',
-      name: 'Distrito Norte - Conflicto Táctico',
-      severity: 'RED',
-      color: 'var(--risk-crit)',
-      description: 'Combates activos reportados · Acceso vetado',
-      center: [-3.7050, 40.4300],
-    },
-    {
-      id: 'z-02',
-      name: 'Corredor Sur - Toque de Queda',
-      severity: 'AMBER',
-      color: 'var(--risk-high)',
-      description: 'Restricción de tránsito 20:00 - 06:00',
-      center: [-3.7040, 40.4168],
-    },
-    {
-      id: 'z-03',
-      name: 'Embajada y Base Segura',
-      severity: 'SAFE_HAVEN',
-      color: 'var(--risk-stable)',
-      description: 'Punto de reunión y extracción segura',
-      center: [-3.7040, 40.4040],
-    },
-  ];
+  const [zones, setZones] = useState<ZoneItem[]>([]);
+  const [isLoadingZones, setIsLoadingZones] = useState<boolean>(true);
+  const [zonesGeoJson, setZonesGeoJson] = useState<GeoJSON.FeatureCollection | null>(null);
+
+  // Cargar zonas reales desde la API (GET /api/zones)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchZones = async () => {
+      try {
+        setIsLoadingZones(true);
+        const res = await fetch('/api/zones');
+        if (!res.ok) return;
+        const data: GeoJSON.FeatureCollection = await res.json();
+        if (!isMounted) return;
+
+        setZonesGeoJson(data);
+
+        const mapped: ZoneItem[] = (data.features || []).map((f: any) => {
+          let center: [number, number] | undefined = undefined;
+          if (f.geometry?.type === 'Polygon' && f.geometry.coordinates?.[0]?.length > 0) {
+            const ring = f.geometry.coordinates[0];
+            let sumLng = 0;
+            let sumLat = 0;
+            for (let i = 0; i < ring.length - 1; i++) {
+              sumLng += ring[i][0];
+              sumLat += ring[i][1];
+            }
+            const count = ring.length - 1;
+            center = [Number((sumLng / count).toFixed(6)), Number((sumLat / count).toFixed(6))];
+          }
+
+          const sev = (f.properties?.severity || 'RED') as ZoneItem['severity'];
+          const defaultColor =
+            sev === 'RED'
+              ? 'var(--risk-crit)'
+              : sev === 'AMBER'
+              ? 'var(--risk-high)'
+              : sev === 'SAFE_HAVEN'
+              ? 'var(--risk-stable)'
+              : 'var(--risk-watch)';
+
+          return {
+            id: String(f.properties?.id || f.id),
+            name: f.properties?.name || 'Zona táctica',
+            severity: sev,
+            color: f.properties?.color || defaultColor,
+            description: f.properties?.description,
+            center,
+            buffer_meters: f.properties?.buffer_meters,
+            is_curfew: f.properties?.is_curfew,
+            curfew_start: f.properties?.curfew_start,
+            curfew_end: f.properties?.curfew_end,
+            contact_phone: f.properties?.contact_phone,
+            radio_frequency: f.properties?.radio_frequency,
+            gate_access_protocol: f.properties?.gate_access_protocol,
+          };
+        });
+
+        setZones(mapped);
+
+        // Actualizar la fuente GeoJSON del mapa si ya está inicializado
+        if (mapRef.current && mapRef.current.getSource('gzn-tactical-zones')) {
+          (mapRef.current.getSource('gzn-tactical-zones') as maplibregl.GeoJSONSource).setData(data);
+        }
+      } catch (err) {
+        console.error('Error cargando zonas de la base de datos:', err);
+      } finally {
+        if (isMounted) setIsLoadingZones(false);
+      }
+    };
+
+    fetchZones();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [refreshTrigger]);
 
   // Inicializar MapLibre GL
   useEffect(() => {
@@ -255,6 +321,75 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({ onAlertTriggered }
           'line-width': 2,
         },
       });
+
+      // 3. Fuente y Capas de Zonas Tácticas Dinámicas (Base de Datos PostGIS)
+      map.addSource('gzn-tactical-zones', {
+        type: 'geojson',
+        data: zonesGeoJson || {
+          type: 'FeatureCollection',
+          features: [],
+        },
+      });
+
+      map.addLayer({
+        id: 'gzn-tactical-zones-fill',
+        type: 'fill',
+        source: 'gzn-tactical-zones',
+        paint: {
+          'fill-color': [
+            'match',
+            ['get', 'severity'],
+            'RED', '#e07a6a',
+            'AMBER', '#d8a84f',
+            'SAFE_HAVEN', '#63b598',
+            'CORRIDOR', '#94bce3',
+            '#98989b',
+          ],
+          'fill-opacity': 0.28,
+        },
+      });
+
+      map.addLayer({
+        id: 'gzn-tactical-zones-line',
+        type: 'line',
+        source: 'gzn-tactical-zones',
+        paint: {
+          'line-color': [
+            'match',
+            ['get', 'severity'],
+            'RED', '#e07a6a',
+            'AMBER', '#d8a84f',
+            'SAFE_HAVEN', '#63b598',
+            'CORRIDOR', '#94bce3',
+            '#98989b',
+          ],
+          'line-width': 2,
+        },
+      });
+
+      // Evento de clic en zona dinámica para desplegar Popup Táctico
+      map.on('click', 'gzn-tactical-zones-fill', (e) => {
+        if (!e.features || e.features.length === 0) return;
+        const f = e.features[0];
+        const p = f.properties || {};
+
+        new maplibregl.Popup({ closeButton: true, maxWidth: '280px' })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family: var(--font-heading, sans-serif); padding: 4px; color: #1d1f20;">
+              <div style="font-size: 9px; font-family: monospace; opacity: 0.6; text-transform: uppercase;">
+                ÁREA TÁCTICA [${p.severity || 'ZONA'}]
+              </div>
+              <div style="font-weight: 700; font-size: 13px; text-transform: uppercase; margin-top: 2px;">
+                ${p.name || 'Sin nombre'}
+              </div>
+              ${p.description ? `<p style="font-size: 11px; opacity: 0.8; margin: 4px 0 0 0; line-height: 1.3;">${p.description}</p>` : ''}
+              ${p.is_curfew ? `<div style="margin-top: 4px; font-size: 10px; color: #a5762d; font-family: monospace;">⚠️ TOQUE DE QUEDA: ${p.curfew_start || ''} - ${p.curfew_end || ''} UTC</div>` : ''}
+              ${p.radio_frequency ? `<div style="font-size: 10px; font-family: monospace; opacity: 0.7; margin-top: 2px;">RADIO: ${p.radio_frequency}</div>` : ''}
+            </div>
+          `)
+          .addTo(map);
+      });
     });
 
     mapRef.current = map;
@@ -335,13 +470,17 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({ onAlertTriggered }
   };
 
   const handleSelectZone = (z: ZoneItem) => {
-    if (!mapRef.current || !z.center) return;
-    mapRef.current.flyTo({
-      center: z.center,
-      zoom: z.severity === 'RED' ? 14 : 15,
-      pitch: 25,
-      duration: 1200,
-    });
+    if (!mapRef.current) return;
+    if (z.center) {
+      const isMacro = z.name.toLowerCase().includes('teatro') || z.name.toLowerCase().includes('país') || z.name.toLowerCase().includes('operativo');
+      mapRef.current.flyTo({
+        center: z.center,
+        zoom: isMacro ? 5.5 : z.severity === 'RED' ? 13.5 : 14.5,
+        pitch: isMacro ? 0 : 20,
+        duration: 1200,
+      });
+      setSimulationLog(`Enfocando ${z.name} [${z.severity}]`);
+    }
   };
 
   const handleCenterFleet = () => {
@@ -478,33 +617,66 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({ onAlertTriggered }
         <div className="p-3 border-b border-[var(--color-divider)]">
           <div className="flex items-center justify-between mb-2">
             <span className="kicker">Zonas y Perímetros</span>
-            <span className="text-[10px] font-mono opacity-50">{zones.length} REGLAS</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono opacity-50">{zones.length} ZONAS</span>
+              {canManageZones && onOpenCreateZone && (
+                <button
+                  type="button"
+                  onClick={onOpenCreateZone}
+                  className="text-[10px] font-heading font-semibold uppercase px-2 py-0.5 border border-[var(--color-accent)] text-[var(--color-accent)] hover:bg-[color-mix(in_srgb,var(--color-accent)_15%,transparent)] transition-colors cursor-pointer"
+                >
+                  + DELIMITAR
+                </button>
+              )}
+            </div>
           </div>
-          <div className="divide-y divide-[color-mix(in_srgb,var(--color-text)_8%,transparent)]">
-            {zones.map((z) => (
-              <div
-                key={z.id}
-                onClick={() => handleSelectZone(z)}
-                className="py-2 px-1 cursor-pointer hover:bg-[color-mix(in_srgb,var(--color-text)_5%,transparent)] transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium">{z.name}</span>
-                  <span
-                    className="tag text-[9px]"
-                    style={{
-                      borderColor: z.color,
-                      color: z.color,
-                    }}
-                  >
-                    {z.severity}
-                  </span>
+          {isLoadingZones ? (
+            <div className="py-3 text-center text-xs font-mono opacity-50">Cargando zonas de PostGIS...</div>
+          ) : zones.length === 0 ? (
+            <div className="py-3 text-center text-xs opacity-60">
+              <span>No hay áreas tácticas activas.</span>
+              {canManageZones && onOpenCreateZone && (
+                <button
+                  type="button"
+                  onClick={onOpenCreateZone}
+                  className="block mx-auto mt-1.5 text-xs font-heading font-semibold uppercase text-[var(--color-accent)] hover:underline cursor-pointer"
+                >
+                  + Delimitar primera zona
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y divide-[color-mix(in_srgb,var(--color-text)_8%,transparent)] max-h-56 overflow-y-auto">
+              {zones.map((z) => (
+                <div
+                  key={z.id}
+                  onClick={() => handleSelectZone(z)}
+                  className="py-2 px-1 cursor-pointer hover:bg-[color-mix(in_srgb,var(--color-text)_5%,transparent)] transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium truncate max-w-[175px]">{z.name}</span>
+                    <span
+                      className="tag text-[9px]"
+                      style={{
+                        borderColor: z.color,
+                        color: z.color,
+                      }}
+                    >
+                      {z.severity}
+                    </span>
+                  </div>
+                  {z.description && (
+                    <p className="text-[11px] opacity-65 m-0 mt-0.5 leading-snug line-clamp-2">{z.description}</p>
+                  )}
+                  {z.is_curfew && (
+                    <span className="text-[9px] font-mono text-[var(--risk-high)] block mt-0.5">
+                      Restricción: {z.curfew_start || ''} - {z.curfew_end || ''} UTC
+                    </span>
+                  )}
                 </div>
-                {z.description && (
-                  <p className="text-[11px] opacity-65 m-0 mt-0.5 leading-snug">{z.description}</p>
-                )}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Log de Campo Táctico */}

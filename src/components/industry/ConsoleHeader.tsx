@@ -13,6 +13,8 @@ interface ConsoleHeaderProps {
   onDirectionChange?: (dir: DirectionType) => void;
   userEmail?: string | null;
   userRole?: string | null;
+  canManageZones?: boolean;
+  onOpenCreateZone?: () => void;
 }
 
 const DIRNOTES: Record<DirectionType, string> = {
@@ -29,6 +31,8 @@ export const ConsoleHeader: React.FC<ConsoleHeaderProps> = ({
   onDirectionChange,
   userEmail,
   userRole,
+  canManageZones = false,
+  onOpenCreateZone,
 }) => {
   const [direction, setDirection] = useState<DirectionType>(currentDirection);
   const [utcTime, setUtcTime] = useState<string>('');
@@ -105,6 +109,22 @@ export const ConsoleHeader: React.FC<ConsoleHeaderProps> = ({
         <span className="clock mono text-xs opacity-60 font-mono hidden sm:inline">
           {utcTime || '--:--:-- UTC'}
         </span>
+
+        {/* Botón de Creación de Área Táctica (Admin / RSO: role_level >= 60) */}
+        {canManageZones && onOpenCreateZone && (
+          <button
+            type="button"
+            onClick={onOpenCreateZone}
+            className="blueprint relative flex items-center gap-1.5 font-heading font-semibold text-[11px] tracking-[0.08em] uppercase px-2.5 py-1.5 border border-[var(--color-accent)] text-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--color-accent)_22%,transparent)] transition-all cursor-pointer shadow-sm"
+          >
+            <span className="corner tl" />
+            <span className="corner tr" />
+            <span className="corner bl" />
+            <span className="corner br" />
+            <span className="text-sm font-bold leading-none">+</span>
+            <span className="hidden sm:inline">Nueva Área</span>
+          </button>
+        )}
 
         {/* Píldora de alertas */}
         <button

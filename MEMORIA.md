@@ -640,10 +640,20 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   **Flujo Estándar Homologado (`sql/009_seed_admin_user.sql`)**: Adopción de protocolo estándar que combina alta nativa en Supabase Auth (`Authentication -> Users` con `Auto Confirm: ON`) y vinculación relacional determinista en `public.profiles` con `role = 'ORG_ADMIN'`, `role_level = 100`, `admin_origin = 'GZN'`.
     *   **Resolución de Clave de API**: Corrección del token JWT anónimo (`NEXT_PUBLIC_SUPABASE_ANON_KEY`) que había sido duplicado en el pegado de variables de entorno (generando 6 segmentos en lugar de 3 y provocando rechazo 401 por el gateway de Supabase).
     *   **Validación de Acceso Real**: Verificación del primer login corporativo con usuario `argoss01@gmail.com` en entorno local y producción Vercel, con acceso fluido a la consola C2 bajo privilegios de `ORG_ADMIN`.
-21. [ ] **Próximo Hito — Consola Web RSO: Conexión de Datos Reales y Autenticación Staff (Módulos 1, 3, 4 y 5):**
-    *   Sustitución de estados mock locales en `TerrenoScreen` por llamadas a endpoints de backend (`GET /api/zones`, `GET /api/alerts`).
-    *   Herramienta de dibujo interactivo de zonas tácticas (`POST /api/zones`) y triaje de alertas (`PATCH /api/alerts/[id]`).
-22. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
+21. [x] **Consola Web RSO — Gestión de Zonas Tácticas, Migración 010 y Conexión de Datos Reales (2026-09-17):**
+    *   **Migración SQL 010 (`sql/010_update_zone_creation_rpc.sql`)**: Actualización de la RPC `create_zone_with_geojson` para alinear con la jerarquía `role_level >= 60` (`RSO: 60`, `CONTROL_TOWER: 80`, `ORG_ADMIN: 100`), incorporación de la columna `assigned_rso_id` en inserciones y retirada formal de la función incompleta `create_tactical_zone`.
+    *   **Modal Táctico de Creación (`ZoneCreationModal.tsx`)**: Implementación bajo estética Blueprint Industry con 3 modalidades geométricas:
+        1. *Por País:* Selección de fronteras mundiales vía Natural Earth TopoJSON (`countries-110m.json`) con extracción determinista del territorio continental principal y advertencia obligatoria de islas/enclaves excluidos ante `MultiPolygon`.
+        2. *Por Región / Radio:* Cálculo trigonométrico esférico WGS84 de círculos geodésicos regulares de 64 vértices (Great Circle).
+        3. *Por Polígono Libre:* Trazado vectorial con cierre automático de anillo lineal RFC 7946.
+    *   **Parámetros Tácticos Operativos**: Soporte de severidad cuádruple (`RED`, `AMBER`, `SAFE_HAVEN`, `CORRIDOR`), buffer de proximidad, restricciones horarias de toque de queda (*curfew*), frecuencias de radio VHF/UHF, contacto satelital y protocolo de puertas.
+    *   **Entradas de Menú RBAC**: Doble acceso autorizado para `role_level >= 60`: botón prominente `[+ NUEVA ÁREA]` en `ConsoleHeader` y botón contextual `[+ DELIMITAR]` en el panel lateral de `TerrenoScreen`.
+    *   **Conexión Real en TerrenoScreen**: Sustitución de datos mock por suscripción a `GET /api/zones` con capas MapLibre GL `gzn-tactical-zones-fill` y `gzn-tactical-zones-line`, popups dinámicos interactivos y revalidación en caliente tras creación.
+    *   **Calidad y Tests**: Suite ampliada a 215 pruebas automatizadas (`scripts/test-bloqueantes.ts`) con 100% de éxito (incluyendo autorización explícita de `CONTROL_TOWER` y validación de las 3 modalidades geométricas) y build de producción Next.js 15.5 limpio en 3.1s.
+22. [ ] **Próximo Hito — Consola Web RSO: Conexión de Alertas en Tiempo Real y Triaje Táctico (Módulo 1 y 3):**
+    *   Conexión de `TerrenoScreen` y `IncidentTape` a `GET /api/alerts` y suscripciones WebSockets en vivo vía Supabase Realtime.
+    *   Herramienta de resolución y triaje de alertas (`PATCH /api/alerts/[id]`).
+23. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
     *   Desarrollo de la aplicación móvil de campo (Flutter / React Native) conectada a la infraestructura backend y sus endpoints autenticados.
 
 ---

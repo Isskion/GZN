@@ -12,6 +12,7 @@ import { FloatingRsoButton } from '@/components/industry/FloatingRsoButton';
 import { IncidentModal } from '@/components/industry/IncidentModal';
 import { IncidentItem } from '@/components/industry/IncidentTape';
 import { Profile } from '@/types/database';
+import { ZoneCreationModal } from '@/components/tactical/ZoneCreationModal';
 
 interface RsoConsoleShellProps {
   user?: { id: string; email?: string } | null;
@@ -22,6 +23,16 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
   const [activeScreen, setActiveScreen] = useState<ScreenId>('terreno');
   const [alertsCount, setAlertsCount] = useState<number>(1);
   const [activeIncidentModal, setActiveIncidentModal] = useState<IncidentItem | null>(null);
+  const [isCreateZoneModalOpen, setIsCreateZoneModalOpen] = useState(false);
+  const [refreshZonesCounter, setRefreshZonesCounter] = useState(0);
+
+  // Control RBAC: role_level >= 60 (RSO, CONTROL_TOWER, ORG_ADMIN)
+  const roleLevel = profile?.role_level ?? (
+    profile?.role === 'ORG_ADMIN' ? 100 :
+    profile?.role === 'CONTROL_TOWER' ? 80 :
+    profile?.role === 'RSO' ? 60 : 40
+  );
+  const canManageZones = roleLevel >= 60;
 
   const screenTitles: Record<ScreenId, string> = {
     terreno: 'Terreno / Sector Táctico',
@@ -42,6 +53,11 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
     });
   };
 
+  const handleZoneCreated = (newZone: any) => {
+    setRefreshZonesCounter((prev) => prev + 1);
+    setActiveScreen('terreno');
+  };
+
   return (
     <div id="app" className="grid grid-rows-[auto_1fr] h-screen bg-[var(--color-bg)] text-[var(--color-text)] font-body overflow-hidden">
       {/* Topbar del Sistema Industry con marca y control de usuario */}
@@ -51,6 +67,8 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
         onAlertPillClick={handleOpenActiveAlertModal}
         userEmail={user?.email || profile?.full_name || null}
         userRole={profile?.role || null}
+        canManageZones={canManageZones}
+        onOpenCreateZone={() => setIsCreateZoneModalOpen(true)}
       />
 
       {/* Cuerpo principal con Rail y Pantalla Activa */}
@@ -66,7 +84,12 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
         {/* Contenedor de la Pantalla Activa */}
         <div className="flex-1 min-h-0 relative overflow-hidden">
           {activeScreen === 'terreno' && (
-            <TerrenoScreen onAlertTriggered={(count) => setAlertsCount(count)} />
+            <TerrenoScreen
+              onAlertTriggered={(count) => setAlertsCount(count)}
+              canManageZones={canManageZones}
+              onOpenCreateZone={() => setIsCreateZoneModalOpen(true)}
+              refreshTrigger={refreshZonesCounter}
+            />
           )}
           {activeScreen === 'situacion' && (
             <SituacionScreen
@@ -93,6 +116,13 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
         incident={activeIncidentModal}
         onClose={() => setActiveIncidentModal(null)}
         onAcknowledge={() => setAlertsCount(0)}
+      />
+
+      {/* Modal Táctico de Delimitación y Creación de Áreas / Zonas */}
+      <ZoneCreationModal
+        isOpen={isCreateZoneModalOpen}
+        onClose={() => setIsCreateZoneModalOpen(false)}
+        onZoneCreated={handleZoneCreated}
       />
     </div>
   );
