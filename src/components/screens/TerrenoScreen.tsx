@@ -71,6 +71,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
 
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationLog, setSimulationLog] = useState<string | null>(null);
+  const [isMapLoaded, setIsMapLoaded] = useState<boolean>(false);
 
   // Motor Cartográfico HERE (Módulo 2)
   const [activeLayer, setActiveLayer] = useState<HereMapStyleId>('explore.night');
@@ -188,11 +189,6 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
         });
 
         setZones(mapped);
-
-        // Actualizar la fuente GeoJSON del mapa si ya está inicializado
-        if (mapRef.current && mapRef.current.getSource('gzn-tactical-zones')) {
-          (mapRef.current.getSource('gzn-tactical-zones') as maplibregl.GeoJSONSource).setData(data);
-        }
       } catch (err) {
         console.error('Error cargando zonas de la base de datos:', err);
       } finally {
@@ -331,82 +327,110 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
         },
       });
 
-      // 3. Fuente y Capas de Zonas Tácticas Dinámicas (Base de Datos PostGIS)
+      // Notificar que el estilo y mapa base están listos
+      setIsMapLoaded(true);
+    });
+
+    mapRef.current = map;
+
+    return () => {
+      setIsMapLoaded(false);
+      map.remove();
+      mapRef.current = null;
+    };
+  }, [hereApiKey]);
+
+  // Sincronización desacoplada de Zonas Tácticas con MapLibre GL (Resuelve condición de carrera)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapLoaded) return;
+
+    const emptyCollection: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [],
+    };
+    const dataToSet = zonesGeoJson || emptyCollection;
+
+    const source = map.getSource('gzn-tactical-zones') as maplibregl.GeoJSONSource | undefined;
+    if (source) {
+      source.setData(dataToSet);
+    } else {
       map.addSource('gzn-tactical-zones', {
         type: 'geojson',
-        data: zonesGeoJson || {
-          type: 'FeatureCollection',
-          features: [],
-        },
+        data: dataToSet,
       });
 
-      map.addLayer({
-        id: 'gzn-tactical-zones-fill',
-        type: 'fill',
-        source: 'gzn-tactical-zones',
-        paint: {
-          'fill-color': [
-            'match',
-            ['get', 'zone_type'],
-            'RESPONSIBILITY',
-            '#5980a6',
-            [
+      if (!map.getLayer('gzn-tactical-zones-fill')) {
+        map.addLayer({
+          id: 'gzn-tactical-zones-fill',
+          type: 'fill',
+          source: 'gzn-tactical-zones',
+          paint: {
+            'fill-color': [
               'match',
-              ['get', 'severity'],
-              'RED',
-              '#e07a6a',
-              'AMBER',
-              '#d8a84f',
-              'SAFE_HAVEN',
-              '#63b598',
-              'CORRIDOR',
-              '#94bce3',
+              ['get', 'zone_type'],
+              'RESPONSIBILITY',
               '#5980a6',
+              [
+                'match',
+                ['get', 'severity'],
+                'RED',
+                '#e07a6a',
+                'AMBER',
+                '#d8a84f',
+                'SAFE_HAVEN',
+                '#63b598',
+                'CORRIDOR',
+                '#94bce3',
+                '#5980a6',
+              ],
             ],
-          ],
-          'fill-opacity': [
-            'match',
-            ['get', 'zone_type'],
-            'RESPONSIBILITY',
-            0.08,
-            0.28,
-          ],
-        },
-      });
+            'fill-opacity': [
+              'match',
+              ['get', 'zone_type'],
+              'RESPONSIBILITY',
+              0.08,
+              0.28,
+            ],
+          },
+        });
+      }
 
-      map.addLayer({
-        id: 'gzn-tactical-zones-line',
-        type: 'line',
-        source: 'gzn-tactical-zones',
-        paint: {
-          'line-color': [
-            'match',
-            ['get', 'zone_type'],
-            'RESPONSIBILITY',
-            '#5980a6',
-            [
+      if (!map.getLayer('gzn-tactical-zones-line')) {
+        map.addLayer({
+          id: 'gzn-tactical-zones-line',
+          type: 'line',
+          source: 'gzn-tactical-zones',
+          paint: {
+            'line-color': [
               'match',
-              ['get', 'severity'],
-              'RED',
-              '#e07a6a',
-              'AMBER',
-              '#d8a84f',
-              'SAFE_HAVEN',
-              '#63b598',
-              'CORRIDOR',
-              '#94bce3',
+              ['get', 'zone_type'],
+              'RESPONSIBILITY',
               '#5980a6',
+              [
+                'match',
+                ['get', 'severity'],
+                'RED',
+                '#e07a6a',
+                'AMBER',
+                '#d8a84f',
+                'SAFE_HAVEN',
+                '#63b598',
+                'CORRIDOR',
+                '#94bce3',
+                '#5980a6',
+              ],
             ],
-          ],
-          'line-width': [
-            'match',
-            ['get', 'zone_type'],
-            'RESPONSIBILITY',
-            1.5,
-            2,
-          ],
-        },
-      });
+            'line-width': [
+              'match',
+              ['get', 'zone_type'],
+              'RESPONSIBILITY',
+              1.5,
+              2,
+            ],
+          },
+        });
+      }
 
       // Evento de clic en zona dinámica para desplegar Popup Táctico
       map.on('click', 'gzn-tactical-zones-fill', (e) => {
@@ -432,15 +456,8 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
           `)
           .addTo(map);
       });
-    });
-
-    mapRef.current = map;
-
-    return () => {
-      map.remove();
-      mapRef.current = null;
-    };
-  }, [hereApiKey]);
+    }
+  }, [isMapLoaded, zonesGeoJson]);
 
   // Actualizar marcadores tácticos
   useEffect(() => {

@@ -1107,6 +1107,14 @@ async function runTests() {
   assert(modalContent.includes("zoneType === 'RESPONSIBILITY'"), 'ZoneCreationModal evalúa zoneType === RESPONSIBILITY');
   assert(modalContent.includes("initialZone"), 'ZoneCreationModal soporta prop initialZone para edición');
 
+  // 14. Verificación de sincronización reactiva en TerrenoScreen.tsx (Resolución de condición de carrera)
+  const terrenoPath = path.resolve(process.cwd(), 'src/components/screens/TerrenoScreen.tsx');
+  const terrenoContent = fs.readFileSync(terrenoPath, 'utf8');
+  assert(terrenoContent.includes('const [isMapLoaded, setIsMapLoaded] = useState'), 'TerrenoScreen.tsx declara el estado isMapLoaded');
+  assert(terrenoContent.includes('[isMapLoaded, zonesGeoJson]'), 'TerrenoScreen.tsx tiene un useEffect dedicado con dependencias [isMapLoaded, zonesGeoJson]');
+  assert(terrenoContent.includes("setIsMapLoaded(true);"), 'TerrenoScreen.tsx activa isMapLoaded en el evento load de MapLibre');
+  assert(terrenoContent.includes("setIsMapLoaded(false);"), 'TerrenoScreen.tsx restablece isMapLoaded en el desmontaje de MapLibre');
+
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);
   console.log('================================================================\n');
