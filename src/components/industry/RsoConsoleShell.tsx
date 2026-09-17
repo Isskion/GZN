@@ -27,6 +27,7 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
   const [isCreateZoneModalOpen, setIsCreateZoneModalOpen] = useState(false);
   const [editingZone, setEditingZone] = useState<any | null>(null);
   const [refreshZonesCounter, setRefreshZonesCounter] = useState(0);
+  const [focusZoneId, setFocusZoneId] = useState<string | null>(null);
 
   // Control RBAC: role_level >= 60 (RSO, CONTROL_TOWER, ORG_ADMIN)
   const roleLevel = profile?.role_level ?? (profile?.role ? ROLE_LEVELS[profile.role as keyof typeof ROLE_LEVELS] : 40);
@@ -100,6 +101,8 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
               }}
               onEditZone={handleEditZone}
               refreshTrigger={refreshZonesCounter}
+              focusZoneId={focusZoneId}
+              onFocusZoneConsumed={() => setFocusZoneId(null)}
             />
           )}
           {activeScreen === 'zonas' && (
@@ -115,7 +118,10 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
           )}
           {activeScreen === 'situacion' && (
             <SituacionScreen
-              onNavigateTerreno={() => setActiveScreen('terreno')}
+              onNavigateTerreno={(zoneId) => {
+                if (zoneId) setFocusZoneId(zoneId);
+                setActiveScreen('terreno');
+              }}
             />
           )}
           {activeScreen === 'personas' && <PersonasScreen />}

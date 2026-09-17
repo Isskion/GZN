@@ -56,6 +56,8 @@ interface TerrenoScreenProps {
   onOpenCreateZone?: () => void;
   onEditZone?: (zone: any) => void;
   refreshTrigger?: number;
+  focusZoneId?: string | null;
+  onFocusZoneConsumed?: () => void;
 }
 
 export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
@@ -64,6 +66,8 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
   onOpenCreateZone,
   onEditZone,
   refreshTrigger = 0,
+  focusZoneId,
+  onFocusZoneConsumed,
 }) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -541,6 +545,16 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
       setSimulationLog(`Enfocando ${z.name} [${z.severity}]`);
     }
   };
+
+  // Enfocar automáticamente una zona seleccionada desde otra pantalla (ej. Situación Global)
+  useEffect(() => {
+    if (!focusZoneId || !isMapLoaded || zones.length === 0) return;
+    const target = zones.find((z) => z.id === focusZoneId);
+    if (target) {
+      handleSelectZone(target);
+      onFocusZoneConsumed?.();
+    }
+  }, [focusZoneId, isMapLoaded, zones]);
 
   const handleCenterFleet = () => {
     if (!mapRef.current || travelers.length === 0) return;

@@ -1115,6 +1115,17 @@ async function runTests() {
   assert(terrenoContent.includes("setIsMapLoaded(true);"), 'TerrenoScreen.tsx activa isMapLoaded en el evento load de MapLibre');
   assert(terrenoContent.includes("setIsMapLoaded(false);"), 'TerrenoScreen.tsx restablece isMapLoaded en el desmontaje de MapLibre');
 
+  // 15. Verificación de flujo de foco de zona desde Situación Global a Terreno (Mandato Daniel / Claude)
+  const situacionPath = path.resolve(process.cwd(), 'src/components/screens/SituacionScreen.tsx');
+  const situacionContent = fs.readFileSync(situacionPath, 'utf8');
+  assert(situacionContent.includes('onNavigateTerreno?: (zoneId?: string) => void'), 'SituacionScreen.tsx admite zoneId en onNavigateTerreno');
+  assert(situacionContent.includes('onNavigateTerreno(selectedZoneId)'), 'SituacionScreen.tsx pasa selectedZoneId al pulsar Inspeccionar en Terreno');
+  assert(shellContent.includes('const [focusZoneId, setFocusZoneId] = useState'), 'RsoConsoleShell.tsx gestiona el estado focusZoneId');
+  assert(shellContent.includes('focusZoneId={focusZoneId}'), 'RsoConsoleShell.tsx pasa focusZoneId a TerrenoScreen');
+  assert(shellContent.includes('onFocusZoneConsumed={() => setFocusZoneId(null)}'), 'RsoConsoleShell.tsx provee callback para consumir el foco');
+  assert(terrenoContent.includes('focusZoneId?: string | null;'), 'TerrenoScreenProps incluye focusZoneId');
+  assert(terrenoContent.includes('[focusZoneId, isMapLoaded, zones]'), 'TerrenoScreen.tsx tiene un useEffect dependiente de [focusZoneId, isMapLoaded, zones]');
+
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);
   console.log('================================================================\n');

@@ -20,7 +20,8 @@ import { BlueprintPlate } from '@/components/industry/BlueprintPlate';
 import { ZoneType, ZoneSeverity } from '@/types/database';
 
 interface SituacionScreenProps {
-  onNavigateTerreno?: () => void;
+  onNavigateTerreno?: (zoneId?: string) => void;
+  onSelectIncident?: (incident: any) => void;
 }
 
 export const SituacionScreen: React.FC<SituacionScreenProps> = ({
@@ -311,7 +312,7 @@ export const SituacionScreen: React.FC<SituacionScreenProps> = ({
               {onNavigateTerreno && (
                 <button
                   type="button"
-                  onClick={onNavigateTerreno}
+                  onClick={() => onNavigateTerreno?.()}
                   className="px-4 py-2 border border-[var(--color-accent)] text-[var(--color-accent)] text-xs font-heading font-bold uppercase tracking-wider hover:bg-[var(--color-accent)]/15 transition-colors flex items-center gap-1.5"
                 >
                   <MapPin className="w-4 h-4" />
@@ -437,7 +438,13 @@ export const SituacionScreen: React.FC<SituacionScreenProps> = ({
                 {onNavigateTerreno && (
                   <button
                     type="button"
-                    onClick={onNavigateTerreno}
+                    onClick={() => {
+                      if (selectedZoneId && onNavigateTerreno) {
+                        onNavigateTerreno(selectedZoneId);
+                      } else {
+                        onNavigateTerreno?.();
+                      }
+                    }}
                     className="w-full py-2 bg-[var(--color-surface)] border border-[var(--color-divider)] hover:border-[var(--color-accent)] text-xs font-heading font-semibold uppercase tracking-wider text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors flex items-center justify-center gap-2"
                   >
                     <MapPin className="w-3.5 h-3.5" />
