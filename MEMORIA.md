@@ -635,10 +635,15 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   **Server Actions de Autenticación (`src/app/actions/auth.ts`)**: Acciones `login(formData)` y `logout()` basadas en cookies seguras `@supabase/ssr` con revalidación de caché de rutas.
     *   **Control de Usuario en Topbar (`ConsoleHeader.tsx`)**: Integración del imagotipo de escudo (28px), visualización del correo y rol activo del usuario, y botón de desconexión "Salir".
     *   **Calidad y Compilación**: Suite ampliada a 192 pruebas automatizadas (`scripts/test-bloqueantes.ts`) con 100% de éxito y compilación de producción Next.js 15.5 (`pnpm build`) limpia en 2.1s.
-20. [ ] **Próximo Hito — Consola Web RSO: Conexión de Datos Reales y Autenticación Staff (Módulos 1, 3, 4 y 5):**
+20. [x] **Aprovisionamiento Inicial de Personal y Homologación de Supabase Auth (2026-09-17):**
+    *   **Diagnóstico y Mitigación en GoTrue**: Identificación de incompatibilidad con inserciones SQL directas en `auth.users` debido a la validación tipada estricta de GoTrue v2+ sobre campos de token nulos (`confirmation_token`, `recovery_token`, etc.), que provocan error de scan y respuesta HTTP 500 (`Database error querying schema`).
+    *   **Flujo Estándar Homologado (`sql/009_seed_admin_user.sql`)**: Adopción de protocolo estándar que combina alta nativa en Supabase Auth (`Authentication -> Users` con `Auto Confirm: ON`) y vinculación relacional determinista en `public.profiles` con `role = 'ORG_ADMIN'`, `role_level = 100`, `admin_origin = 'GZN'`.
+    *   **Resolución de Clave de API**: Corrección del token JWT anónimo (`NEXT_PUBLIC_SUPABASE_ANON_KEY`) que había sido duplicado en el pegado de variables de entorno (generando 6 segmentos en lugar de 3 y provocando rechazo 401 por el gateway de Supabase).
+    *   **Validación de Acceso Real**: Verificación del primer login corporativo con usuario `argoss01@gmail.com` en entorno local y producción Vercel, con acceso fluido a la consola C2 bajo privilegios de `ORG_ADMIN`.
+21. [ ] **Próximo Hito — Consola Web RSO: Conexión de Datos Reales y Autenticación Staff (Módulos 1, 3, 4 y 5):**
     *   Sustitución de estados mock locales en `TerrenoScreen` por llamadas a endpoints de backend (`GET /api/zones`, `GET /api/alerts`).
     *   Herramienta de dibujo interactivo de zonas tácticas (`POST /api/zones`) y triaje de alertas (`PATCH /api/alerts/[id]`).
-21. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
+22. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
     *   Desarrollo de la aplicación móvil de campo (Flutter / React Native) conectada a la infraestructura backend y sus endpoints autenticados.
 
 ---
