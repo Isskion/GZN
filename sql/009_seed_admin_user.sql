@@ -1,74 +1,37 @@
 -- ==============================================================================
--- GZN — APROVISIONAMIENTO DIRECTO EN SQL DE USUARIO ADMIN (argoss01@gmail.com)
--- SQL puro (sin bloques PL/pgSQL ni comandos RAISE)
+-- GZN — APROVISIONAMIENTO DE USUARIO ADMINISTRADOR (argoss01@gmail.com)
+-- ==============================================================================
+-- INSTRUCCIONES:
+--
+-- MÉTODO RECOMENDADO (100% NATIVO Y SEGURO):
+-- 1. Si ejecutaste un script previo que falló, corre la SECCIÓN 0 para limpiar.
+-- 2. En el panel de Supabase: Ve a "Authentication" -> "Users" -> "Add User" -> "Create User"
+--    - Email: argoss01@gmail.com
+--    - Password: tu contraseña deseada (ej: Aleg0r1a)
+--    - Auto Confirm User?: SÍ (marcar la casilla)
+--    - Clic en "Create User"
+-- 3. Vuelve al SQL Editor y ejecuta la SECCIÓN 1 (Vinculación de Perfil ORG_ADMIN).
+--
 -- ==============================================================================
 
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- ------------------------------------------------------------------------------
+-- SECCIÓN 0: LIMPIEZA PREVENTIVA DE RESIDUOS PREVIOS (SI HUBIERA FALLADO ANTES)
+-- ------------------------------------------------------------------------------
+DELETE FROM public.profiles WHERE id = 'd0000001-0000-0000-0000-000000000001';
+DELETE FROM auth.identities WHERE user_id = 'd0000001-0000-0000-0000-000000000001';
+DELETE FROM auth.users WHERE email IN ('argoss01@gmail.com', 'testclean9988@gmail.com');
 
--- 1. Asegurar organización por defecto
+-- ------------------------------------------------------------------------------
+-- SECCIÓN 1: ASIGNACIÓN DE PERFIL ORG_ADMIN (NIVEL 100) AL USUARIO DE AUTH
+-- (Ejecutar después de crear el usuario en Authentication -> Users)
+-- ------------------------------------------------------------------------------
+
+-- Asegurar que existe al menos una organización
 INSERT INTO public.organizations (name)
 VALUES ('GZN Global Operations')
 ON CONFLICT DO NOTHING;
 
--- 2. Insertar usuario en auth.users con email confirmado y contraseña Aleg0r1a
-INSERT INTO auth.users (
-  id,
-  instance_id,
-  aud,
-  role,
-  email,
-  encrypted_password,
-  email_confirmed_at,
-  raw_app_meta_data,
-  raw_user_meta_data,
-  created_at,
-  updated_at,
-  confirmation_token
-)
-VALUES (
-  'd0000001-0000-0000-0000-000000000001',
-  '00000000-0000-0000-0000-000000000000',
-  'authenticated',
-  'authenticated',
-  'argoss01@gmail.com',
-  crypt('Aleg0r1a', gen_salt('bf')),
-  now(),
-  '{"provider":"email","providers":["email"]}'::jsonb,
-  '{"full_name":"Daniel del Amo"}'::jsonb,
-  now(),
-  now(),
-  ''
-)
-ON CONFLICT (id) DO UPDATE SET
-  encrypted_password = crypt('Aleg0r1a', gen_salt('bf')),
-  email_confirmed_at = now(),
-  updated_at = now();
-
--- 3. Insertar identidad GoTrue para autenticación por email y contraseña
-INSERT INTO auth.identities (
-  id,
-  user_id,
-  identity_data,
-  provider,
-  provider_id,
-  last_sign_in_at,
-  created_at,
-  updated_at
-)
-VALUES (
-  'd0000001-0000-0000-0000-000000000001',
-  'd0000001-0000-0000-0000-000000000001',
-  '{"sub":"d0000001-0000-0000-0000-000000000001","email":"argoss01@gmail.com"}'::jsonb,
-  'email',
-  'd0000001-0000-0000-0000-000000000001',
-  now(),
-  now(),
-  now()
-)
-ON CONFLICT DO NOTHING;
-
--- 4. Crear o actualizar perfil en public.profiles con rol ORG_ADMIN (nivel 100)
+-- Vincular el usuario de auth al perfil ORG_ADMIN
 INSERT INTO public.profiles (
   id,
   organization_id,
@@ -78,16 +41,24 @@ INSERT INTO public.profiles (
   admin_origin
 )
 SELECT 
-  'd0000001-0000-0000-0000-000000000001',
-  id,
+  u.id,
+  o.id,
   'Daniel del Amo',
   'ORG_ADMIN',
   100,
   'GZN'
-FROM public.organizations
-LIMIT 1
+FROM auth.users u
+CROSS JOIN (SELECT id FROM public.organizations ORDER BY created_at ASC LIMIT 1) o
+WHERE u.email = 'argoss01@gmail.com'
 ON CONFLICT (id) DO UPDATE SET 
   role = 'ORG_ADMIN',
   role_level = 100,
   admin_origin = 'GZN',
   full_name = 'Daniel del Amo';
+
+-- Verificación final
+SELECT p.id, p.full_name, p.role, p.role_level, p.admin_origin, o.name AS organization
+FROM public.profiles p
+JOIN public.organizations o ON p.organization_id = o.id
+JOIN auth.users u ON p.id = u.id
+WHERE u.email = 'argoss01@gmail.com';
