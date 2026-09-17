@@ -1045,6 +1045,68 @@ async function runTests() {
   const shellContent = fs.readFileSync(shellPath, 'utf8');
   assert(shellContent.includes('ROLE_LEVELS'), 'RsoConsoleShell.tsx importa y utiliza la constante única ROLE_LEVELS');
 
+  // --- 15. Tipología de Zonas (RESPONSIBILITY vs THREAT) y Gestión de Zonas (Mandato Claude) ---
+  console.log('\n--- 15. Tipología de Zonas (RESPONSIBILITY vs THREAT) y Gestión de Zonas (Mandato Claude) ---');
+
+  // 1. Validar acceso a pantalla 'zonas' en DEFAULT_ROLE_SCREEN_ACCESS para todos los roles
+  const rolesWithZonasAccess = Object.entries(DEFAULT_ROLE_SCREEN_ACCESS).every(
+    ([_, access]) => access.zonas === true
+  );
+  assert(rolesWithZonasAccess, 'Todos los roles tienen acceso base a la pantalla "zonas"');
+
+  // 2. Smoke test estático de migración sql/011_zone_types_and_management.sql
+  const sql011Path = path.resolve(process.cwd(), 'sql/011_zone_types_and_management.sql');
+  assert(fs.existsSync(sql011Path), 'sql/011_zone_types_and_management.sql existe');
+  const sql011Content = fs.readFileSync(sql011Path, 'utf8');
+
+  // 3. Verificar adición de columna zone_type y enum check en sql/011
+  assert(sql011Content.includes('zone_type TEXT DEFAULT \'THREAT\''), 'sql/011 añade columna zone_type con default THREAT');
+  assert(sql011Content.includes("CHECK (zone_type IN ('RESPONSIBILITY', 'THREAT'))"), 'sql/011 restringe zone_type a RESPONSIBILITY o THREAT');
+
+  // 4. Verificar que severity incluye OPERATIONAL en sql/011
+  assert(sql011Content.includes("'OPERATIONAL'"), 'sql/011 incluye OPERATIONAL en el catálogo de severidades permitidas');
+
+  // 5. Verificar regla de consistencia check_zone_type_consistency en DB (sql/011)
+  assert(sql011Content.includes('check_zone_type_consistency'), 'sql/011 define la restricción check_zone_type_consistency');
+  assert(sql011Content.includes("zone_type = 'RESPONSIBILITY' AND severity = 'OPERATIONAL' AND assigned_rso_id IS NOT NULL"), 'sql/011 exige RSO no nulo y severidad OPERATIONAL para RESPONSIBILITY');
+
+  // 6. Verificar que la RPC fija el color inviolable #5980a6 para RESPONSIBILITY (Mandato Claude)
+  assert(sql011Content.includes("v_color := '#5980a6'"), 'sql/011 fija v_color := #5980a6 para RESPONSIBILITY ignorando color del cliente');
+
+  // 7. Verificar parámetro p_zone_type en la RPC sql/011
+  assert(sql011Content.includes("p_zone_type TEXT DEFAULT 'THREAT'"), 'sql/011 incluye p_zone_type en create_zone_with_geojson');
+
+  // 8. Verificar ausencia total de SUPER_ADMIN en sql/011
+  assert(!sql011Content.includes("'SUPER_ADMIN'"), 'sql/011 no contiene referencias obsoletas a SUPER_ADMIN');
+
+  // 9. Verificar control numérico role_level < 60 en sql/011
+  assert(sql011Content.includes('v_role_level < 60'), 'sql/011 verifica v_role_level < 60');
+
+  // 10. Smoke test en endpoint PATCH /api/zones/[id]/route.ts
+  const apiZoneIdPath = path.resolve(process.cwd(), 'src/app/api/zones/[id]/route.ts');
+  const apiZoneIdContent = fs.readFileSync(apiZoneIdPath, 'utf8');
+  assert(apiZoneIdContent.includes("'OPERATIONAL'"), 'PATCH /api/zones/[id] incluye OPERATIONAL en ALLOWED_SEVERITIES');
+  assert(apiZoneIdContent.includes("targetZoneType === 'RESPONSIBILITY'") && apiZoneIdContent.includes("!targetRsoId"), 'PATCH /api/zones/[id] valida en TS que RESPONSIBILITY exige RSO (400)');
+  assert(apiZoneIdContent.includes("targetSeverity !== 'OPERATIONAL'"), 'PATCH /api/zones/[id] valida en TS que RESPONSIBILITY exige severidad OPERATIONAL (400)');
+  assert(apiZoneIdContent.includes("updates.color_hex = '#5980a6'"), 'PATCH /api/zones/[id] fuerza color #5980a6 para RESPONSIBILITY');
+
+  // 11. Smoke test en endpoint GET /api/profiles/route.ts
+  const apiProfilesPath = path.resolve(process.cwd(), 'src/app/api/profiles/route.ts');
+  assert(fs.existsSync(apiProfilesPath), 'src/app/api/profiles/route.ts existe');
+  const apiProfilesContent = fs.readFileSync(apiProfilesPath, 'utf8');
+  assert(apiProfilesContent.includes('.gte(\'role_level\', 60)'), 'GET /api/profiles filtra role_level >= 60');
+
+  // 12. Smoke test en ConsoleRail.tsx y RsoConsoleShell.tsx para pantalla 'zonas'
+  assert(railContent.includes("id: 'zonas'"), "ConsoleRail.tsx incluye el ítem 'zonas' en el menú de navegación");
+  assert(shellContent.includes("import { ZonasScreen } from '@/components/screens/ZonasScreen'"), 'RsoConsoleShell.tsx importa ZonasScreen');
+  assert(shellContent.includes("activeScreen === 'zonas'"), 'RsoConsoleShell.tsx renderiza ZonasScreen');
+
+  // 13. Smoke test en ZoneCreationModal.tsx para selector de tipología y forzado de color
+  const modalPath = path.resolve(process.cwd(), 'src/components/tactical/ZoneCreationModal.tsx');
+  const modalContent = fs.readFileSync(modalPath, 'utf8');
+  assert(modalContent.includes("zoneType === 'RESPONSIBILITY'"), 'ZoneCreationModal evalúa zoneType === RESPONSIBILITY');
+  assert(modalContent.includes("initialZone"), 'ZoneCreationModal soporta prop initialZone para edición');
+
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);
   console.log('================================================================\n');

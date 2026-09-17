@@ -10,6 +10,7 @@ export const ROLE_LEVELS: Record<UserRole, number> = {
 export const DEFAULT_ROLE_SCREEN_ACCESS: Record<UserRole, Record<string, boolean>> = {
   ORG_ADMIN: {
     terreno: true,
+    zonas: true,
     situacion: true,
     personas: true,
     briefings: true,
@@ -17,6 +18,7 @@ export const DEFAULT_ROLE_SCREEN_ACCESS: Record<UserRole, Record<string, boolean
   },
   CONTROL_TOWER: {
     terreno: true,
+    zonas: true,
     situacion: true,
     personas: true,
     briefings: true,
@@ -24,6 +26,7 @@ export const DEFAULT_ROLE_SCREEN_ACCESS: Record<UserRole, Record<string, boolean
   },
   RSO: {
     terreno: true,
+    zonas: true,
     situacion: false, // Activable por excepción para RSOs multi-zona
     personas: true,
     briefings: true,
@@ -31,6 +34,7 @@ export const DEFAULT_ROLE_SCREEN_ACCESS: Record<UserRole, Record<string, boolean
   },
   OPERATOR: {
     terreno: true,
+    zonas: true,
     situacion: false,
     personas: true,
     briefings: true,
@@ -50,7 +54,8 @@ export function hasScreenAccess(
 }
 
 export type TravelerStatus = 'SAFE' | 'WARNING' | 'DANGER' | 'PANIC' | 'INCOMMUNICADO';
-export type ZoneSeverity = 'RED' | 'AMBER' | 'SAFE_HAVEN' | 'CORRIDOR';
+export type ZoneType = 'RESPONSIBILITY' | 'THREAT';
+export type ZoneSeverity = 'RED' | 'AMBER' | 'SAFE_HAVEN' | 'CORRIDOR' | 'OPERATIONAL';
 export type AlertType = 'ZONE_VIOLATION' | 'PANIC_BUTTON' | 'DEAD_MAN_TRIGGER' | 'DURESS_PIN' | 'DEVIATION' | 'MANUAL_SOS';
 export type AlertSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'INVESTIGATING' | 'RESOLVED' | 'FALSE_ALARM';
@@ -104,6 +109,7 @@ export interface Zone {
   organization_id: string;
   created_by?: string | null;
   assigned_rso_id?: string | null;
+  zone_type: ZoneType;
   name: string;
   description?: string | null;
   severity: ZoneSeverity;

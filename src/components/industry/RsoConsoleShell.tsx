@@ -8,6 +8,7 @@ import { PersonasScreen } from '@/components/screens/PersonasScreen';
 import { SituacionScreen } from '@/components/screens/SituacionScreen';
 import { MensajesScreen } from '@/components/screens/MensajesScreen';
 import { BriefingsScreen } from '@/components/screens/BriefingsScreen';
+import { ZonasScreen } from '@/components/screens/ZonasScreen';
 import { FloatingRsoButton } from '@/components/industry/FloatingRsoButton';
 import { IncidentModal } from '@/components/industry/IncidentModal';
 import { IncidentItem } from '@/components/industry/IncidentTape';
@@ -24,6 +25,7 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
   const [alertsCount, setAlertsCount] = useState<number>(1);
   const [activeIncidentModal, setActiveIncidentModal] = useState<IncidentItem | null>(null);
   const [isCreateZoneModalOpen, setIsCreateZoneModalOpen] = useState(false);
+  const [editingZone, setEditingZone] = useState<any | null>(null);
   const [refreshZonesCounter, setRefreshZonesCounter] = useState(0);
 
   // Control RBAC: role_level >= 60 (RSO, CONTROL_TOWER, ORG_ADMIN)
@@ -32,6 +34,7 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
 
   const screenTitles: Record<ScreenId, string> = {
     terreno: 'Terreno / Sector Táctico',
+    zonas: 'Gestión de Zonas / Áreas',
     situacion: 'Situación Global',
     personas: 'Cartera de Personas',
     briefings: 'Sala de Briefings Tácticos',
@@ -51,7 +54,12 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
 
   const handleZoneCreated = (newZone: any) => {
     setRefreshZonesCounter((prev) => prev + 1);
-    setActiveScreen('terreno');
+    setIsCreateZoneModalOpen(false);
+    setEditingZone(null);
+  };
+
+  const handleEditZone = (zone: any) => {
+    setEditingZone(zone);
   };
 
   return (
@@ -64,7 +72,10 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
         userEmail={user?.email || profile?.full_name || null}
         userRole={profile?.role || null}
         canManageZones={canManageZones}
-        onOpenCreateZone={() => setIsCreateZoneModalOpen(true)}
+        onOpenCreateZone={() => {
+          setEditingZone(null);
+          setIsCreateZoneModalOpen(true);
+        }}
       />
 
       {/* Cuerpo principal con Rail y Pantalla Activa */}
@@ -83,13 +94,27 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
             <TerrenoScreen
               onAlertTriggered={(count) => setAlertsCount(count)}
               canManageZones={canManageZones}
-              onOpenCreateZone={() => setIsCreateZoneModalOpen(true)}
+              onOpenCreateZone={() => {
+                setEditingZone(null);
+                setIsCreateZoneModalOpen(true);
+              }}
+              onEditZone={handleEditZone}
+              refreshTrigger={refreshZonesCounter}
+            />
+          )}
+          {activeScreen === 'zonas' && (
+            <ZonasScreen
+              canManageZones={canManageZones}
+              onOpenCreateZone={() => {
+                setEditingZone(null);
+                setIsCreateZoneModalOpen(true);
+              }}
+              onEditZone={handleEditZone}
               refreshTrigger={refreshZonesCounter}
             />
           )}
           {activeScreen === 'situacion' && (
             <SituacionScreen
-              onSelectIncident={(inc) => setActiveIncidentModal(inc)}
               onNavigateTerreno={() => setActiveScreen('terreno')}
             />
           )}
@@ -114,12 +139,18 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
         onAcknowledge={() => setAlertsCount(0)}
       />
 
-      {/* Modal Táctico de Delimitación y Creación de Áreas / Zonas */}
-      <ZoneCreationModal
-        isOpen={isCreateZoneModalOpen}
-        onClose={() => setIsCreateZoneModalOpen(false)}
-        onZoneCreated={handleZoneCreated}
-      />
+      {/* Modal Táctico de Delimitación y Creación / Edición de Áreas / Zonas */}
+      {(isCreateZoneModalOpen || editingZone !== null) && (
+        <ZoneCreationModal
+          isOpen={isCreateZoneModalOpen || editingZone !== null}
+          initialZone={editingZone ?? undefined}
+          onClose={() => {
+            setIsCreateZoneModalOpen(false);
+            setEditingZone(null);
+          }}
+          onZoneCreated={handleZoneCreated}
+        />
+      )}
     </div>
   );
 }

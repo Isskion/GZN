@@ -15,6 +15,8 @@ import {
   ChevronUp,
   Check,
   Search,
+  UserCheck,
+  Edit3,
 } from 'lucide-react';
 import {
   generateGeodesicCircle,
@@ -24,21 +26,29 @@ import {
   ExtractedCountryGeometry,
 } from '@/lib/geo/tactical-zones';
 import { validateGeoJSONPolygon } from '@/lib/geo/validation';
+import { ZoneType, ZoneSeverity } from '@/types/database';
 
 export type DelimitationMode = 'country' | 'radius' | 'freehand';
-export type TacticalSeverity = 'RED' | 'AMBER' | 'SAFE_HAVEN' | 'CORRIDOR';
+export type TacticalSeverity = ZoneSeverity;
 
 interface ZoneCreationModalProps {
   isOpen: boolean;
   onClose: () => void;
   onZoneCreated: (newZone: any) => void;
   initialCenter?: [number, number]; // [lng, lat]
+  initialZone?: any; // Para modo edición
 }
 
 const SEVERITY_CONFIG: Record<
   TacticalSeverity,
   { label: string; kicker: string; color: string; desc: string }
 > = {
+  OPERATIONAL: {
+    label: 'CONTROL OPERATIVO',
+    kicker: 'MANDO / RSO',
+    color: 'var(--color-accent)',
+    desc: 'Ámbito de responsabilidad y supervisión territorial bajo el mando de un RSO.',
+  },
   RED: {
     label: 'ZONA ROJA',
     kicker: 'HOSTIL / PROHIBIDO',
@@ -70,13 +80,21 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
   onClose,
   onZoneCreated,
   initialCenter = [-3.7038, 40.4168],
+  initialZone = null,
 }) => {
+  const isEditMode = Boolean(initialZone);
+
+  // Tipología y severidad
+  const [zoneType, setZoneType] = useState<ZoneType>('THREAT');
+  const [severity, setSeverity] = useState<TacticalSeverity>('RED');
+
+  // Modalidad geométrica
   const [mode, setMode] = useState<DelimitationMode>('country');
 
   // Formulario táctico
   const [name, setName] = useState('');
-  const [severity, setSeverity] = useState<TacticalSeverity>('RED');
   const [description, setDescription] = useState('');
+  const [assignedRsoId, setAssignedRsoId] = useState('');
   const [bufferMeters, setBufferMeters] = useState(500);
   const [isCurfew, setIsCurfew] = useState(false);
   const [curfewStart, setCurfewStart] = useState('22:00');
@@ -86,6 +104,10 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
   const [gateAccessProtocol, setGateAccessProtocol] = useState('');
   const [validUntil, setValidUntil] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Lista de RSOs disponibles
+  const [rsoList, setRsoList] = useState<{ id: string; full_name: string; role: string }[]>([]);
+  const [isLoadingRsos, setIsLoadingRsos] = useState(false);
 
   // Estado TopoJSON para Modalidad A (País)
   const [worldTopology, setWorldTopology] = useState<any>(null);
@@ -108,15 +130,72 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Cargar dataset TopoJSON de países
+  // Cargar lista de RSOs de la organización
   useEffect(() => {
-    if (!worldTopology) {
+    if (isOpen) {
+      setIsLoadingRsos(true);
+      fetch('/api/profiles')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.data) {
+            setRsoList(data.data);
+          }
+        })
+        .catch((err) => console.error('Error al cargar perfiles tácticos:', err))
+        .finally(() => setIsLoadingRsos(false));
+    }
+  }, [isOpen]);
+
+  // Cargar dataset TopoJSON de países (solo si no es modo edición)
+  useEffect(() => {
+    if (!worldTopology && isOpen && !isEditMode) {
       fetch('/data/countries-110m.json')
         .then((res) => res.json())
         .then((data) => setWorldTopology(data))
         .catch((err) => console.error('Error cargando países TopoJSON:', err));
     }
-  }, [worldTopology]);
+  }, [worldTopology, isOpen, isEditMode]);
+
+  // Sincronizar estado inicial al abrir o cambiar de zona
+  useEffect(() => {
+    if (isOpen) {
+      setSubmitError(null);
+      if (initialZone) {
+        const p = initialZone.properties || {};
+        setName(p.name || '');
+        setDescription(p.description || '');
+        const zType: ZoneType = p.zone_type === 'RESPONSIBILITY' ? 'RESPONSIBILITY' : 'THREAT';
+        setZoneType(zType);
+        setSeverity(p.severity || (zType === 'RESPONSIBILITY' ? 'OPERATIONAL' : 'RED'));
+        setAssignedRsoId(p.assigned_rso_id || '');
+        setBufferMeters(p.buffer_meters ?? 500);
+        setIsCurfew(p.is_curfew ?? false);
+        setCurfewStart(p.curfew_start ? p.curfew_start.slice(0, 5) : '22:00');
+        setCurfewEnd(p.curfew_end ? p.curfew_end.slice(0, 5) : '06:00');
+        setContactPhone(p.contact_phone || '');
+        setRadioFrequency(p.radio_frequency || '');
+        setGateAccessProtocol(p.gate_access_protocol || '');
+        setValidUntil(p.valid_until ? p.valid_until.slice(0, 16) : '');
+      } else {
+        setName('');
+        setDescription('');
+        setZoneType('THREAT');
+        setSeverity('RED');
+        setAssignedRsoId('');
+        setBufferMeters(500);
+        setIsCurfew(false);
+        setCurfewStart('22:00');
+        setCurfewEnd('06:00');
+        setContactPhone('');
+        setRadioFrequency('');
+        setGateAccessProtocol('');
+        setValidUntil('');
+        setSelectedCountryId('');
+        setSelectedCountryName('');
+        setCountryExtraction(null);
+      }
+    }
+  }, [isOpen, initialZone]);
 
   // Lista filtrada de países disponibles
   const countryList = useMemo(() => {
@@ -138,8 +217,8 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
   const handleSelectCountry = (cId: string, cName: string) => {
     setSelectedCountryId(cId);
     setSelectedCountryName(cName);
-    if (!name || name.startsWith('Teatro Operativo -')) {
-      setName(`Teatro Operativo - ${cName}`);
+    if (!name || name.startsWith('Teatro Operativo -') || name.startsWith('Área Táctica -')) {
+      setName(zoneType === 'RESPONSIBILITY' ? `Teatro Operativo - ${cName}` : `Área Táctica - ${cName}`);
     }
 
     if (!worldTopology) return;
@@ -150,47 +229,61 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
       if (!geom) return;
 
       const feature: any = topojson.feature(worldTopology, geom);
-      const extraction = extractMainContinentPolygon(feature.geometry);
-      setCountryExtraction(extraction);
-    } catch (err) {
-      console.error('Error extrayendo polígono de país:', err);
+      if (feature && feature.geometry) {
+        const extraction = extractMainContinentPolygon(feature.geometry);
+        setCountryExtraction(extraction);
+      }
+    } catch (err: any) {
+      console.error('Fallo al extraer geometría de país:', err);
+      setCountryExtraction(null);
     }
   };
 
-  // Calcular la geometría activa según la modalidad seleccionada
-  const activeGeometry: GeoJSON.Polygon | null = useMemo(() => {
+  // Geometría activa calculada según modalidad
+  const activeGeometry = useMemo<GeoJSON.Polygon | null>(() => {
+    if (isEditMode && initialZone?.geometry) {
+      return initialZone.geometry;
+    }
+
     if (mode === 'country') {
-      return countryExtraction ? countryExtraction.polygon : null;
+      return countryExtraction?.polygon || null;
     }
 
     if (mode === 'radius') {
-      if (isNaN(centerLng) || isNaN(centerLat) || radiusKm <= 0) return null;
+      if (isNaN(centerLng) || isNaN(centerLat) || isNaN(radiusKm) || radiusKm <= 0) return null;
       return generateGeodesicCircle(centerLng, centerLat, radiusKm, 64);
     }
 
     if (mode === 'freehand') {
-      // Parsear líneas de texto [lng, lat]
-      const lines = rawCoordinatesText.trim().split('\n');
-      const pts: [number, number][] = [];
+      const lines = rawCoordinatesText
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const points: [number, number][] = [];
+
       for (const line of lines) {
-        const parts = line.split(',').map((p) => parseFloat(p.trim()));
-        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-          pts.push([parts[0], parts[1]]);
+        const parts = line.split(/[,\s]+/).map(Number);
+        if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          points.push([parts[0], parts[1]]);
         }
       }
-      return closeDrawnPolygon(pts);
+
+      if (points.length < 3) return null;
+      return closeDrawnPolygon(points);
     }
 
     return null;
-  }, [mode, countryExtraction, centerLng, centerLat, radiusKm, rawCoordinatesText]);
+  }, [isEditMode, initialZone, mode, countryExtraction, centerLng, centerLat, radiusKm, rawCoordinatesText]);
 
-  // Superficie estimada
-  const estimatedAreaKm2 = useMemo(() => {
-    if (!activeGeometry || !activeGeometry.coordinates[0]) return 0;
+  // Superficie aproximada calculada
+  const approximateAreaKm2 = useMemo(() => {
+    if (!activeGeometry || !activeGeometry.coordinates || activeGeometry.coordinates.length === 0) {
+      return 0;
+    }
     return calculateRingAreaKm2(activeGeometry.coordinates[0]);
   }, [activeGeometry]);
 
-  // Validar y enviar
+  // Validar y enviar (POST para alta, PATCH para edición)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
@@ -200,51 +293,92 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
       return;
     }
 
-    if (!activeGeometry) {
-      setSubmitError('No se ha podido generar una geometría GeoJSON válida para la zona.');
+    // Regla de negocio estricta: Zona de Control exige RSO asignado
+    if (zoneType === 'RESPONSIBILITY' && !assignedRsoId) {
+      setSubmitError('Para zonas de control operativo (RESPONSIBILITY) es estrictamente obligatorio asignar un RSO responsable.');
       return;
     }
 
-    const validation = validateGeoJSONPolygon(activeGeometry);
-    if (!validation.valid) {
-      setSubmitError(`Geometría inválida: ${validation.error}`);
-      return;
+    if (!isEditMode) {
+      if (!activeGeometry) {
+        setSubmitError('No se ha podido generar una geometría GeoJSON válida para la zona.');
+        return;
+      }
+
+      const validation = validateGeoJSONPolygon(activeGeometry);
+      if (!validation.valid) {
+        setSubmitError(`Geometría inválida: ${validation.error}`);
+        return;
+      }
     }
 
     setIsSubmitting(true);
 
     try {
-      const payload: any = {
-        name: name.trim(),
-        description: description.trim() || undefined,
-        severity,
-        geojson_geometry: activeGeometry,
-        buffer_meters: bufferMeters,
-        is_curfew: isCurfew,
-        curfew_start: isCurfew ? curfewStart : null,
-        curfew_end: isCurfew ? curfewEnd : null,
-        contact_phone: contactPhone.trim() || null,
-        radio_frequency: radioFrequency.trim() || null,
-        gate_access_protocol: gateAccessProtocol.trim() || null,
-        valid_until: validUntil ? new Date(validUntil).toISOString() : null,
-      };
+      if (isEditMode) {
+        // Modo Edición: PATCH /api/zones/[id]
+        const response = await fetch(`/api/zones/${initialZone.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim(),
+            description: description.trim() || null,
+            zone_type: zoneType,
+            severity: zoneType === 'RESPONSIBILITY' ? 'OPERATIONAL' : severity,
+            assigned_rso_id: assignedRsoId || null,
+            buffer_meters: bufferMeters,
+            is_curfew: isCurfew,
+            curfew_start: isCurfew ? curfewStart : null,
+            curfew_end: isCurfew ? curfewEnd : null,
+            contact_phone: contactPhone.trim() || null,
+            radio_frequency: radioFrequency.trim() || null,
+            gate_access_protocol: gateAccessProtocol.trim() || null,
+            valid_until: validUntil ? new Date(validUntil).toISOString() : null,
+          }),
+        });
 
-      const response = await fetch('/api/zones', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.error || 'Error al actualizar la zona');
+        }
 
-      const result = await response.json();
+        onZoneCreated(result.zone);
+        onClose();
+      } else {
+        // Modo Creación: POST /api/zones
+        const payload: any = {
+          name: name.trim(),
+          description: description.trim() || undefined,
+          zone_type: zoneType,
+          severity: zoneType === 'RESPONSIBILITY' ? 'OPERATIONAL' : severity,
+          assigned_rso_id: assignedRsoId || null,
+          geojson_geometry: activeGeometry,
+          buffer_meters: bufferMeters,
+          is_curfew: isCurfew,
+          curfew_start: isCurfew ? curfewStart : null,
+          curfew_end: isCurfew ? curfewEnd : null,
+          contact_phone: contactPhone.trim() || null,
+          radio_frequency: radioFrequency.trim() || null,
+          gate_access_protocol: gateAccessProtocol.trim() || null,
+          valid_until: validUntil ? new Date(validUntil).toISOString() : null,
+        };
 
-      if (!response.ok) {
-        throw new Error(result.error || 'Fallo en la creación de la zona');
+        const response = await fetch('/api/zones', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.error || 'Fallo en la creación de la zona');
+        }
+
+        onZoneCreated(result.zone);
+        onClose();
       }
-
-      onZoneCreated(result.zone);
-      onClose();
     } catch (err: any) {
-      setSubmitError(err.message || 'Error de conexión al registrar el área');
+      setSubmitError(err.message || 'Error de conexión con el servidor');
     } finally {
       setIsSubmitting(false);
     }
@@ -276,14 +410,23 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
               id="modal-zone-title"
               className="text-xl font-heading font-semibold uppercase tracking-wide flex items-center gap-2"
             >
-              <Shield className="w-5 h-5 text-[var(--color-accent)]" />
-              Delimitación de Área / Zona Táctica
+              {isEditMode ? (
+                <>
+                  <Edit3 className="w-5 h-5 text-[var(--color-accent)]" />
+                  Editar Área Táctica // {name || initialZone?.properties?.name}
+                </>
+              ) : (
+                <>
+                  <Shield className="w-5 h-5 text-[var(--color-accent)]" />
+                  Delimitación de Área / Zona Táctica
+                </>
+              )}
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Cerrar modal de creación"
+            aria-label="Cerrar modal"
             className="w-8 h-8 flex items-center justify-center border border-[var(--color-divider)] hover:bg-[color-mix(in_srgb,var(--color-text)_10%,transparent)] transition-colors"
           >
             <X className="w-4 h-4" />
@@ -298,344 +441,464 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Selector de Modalidad (3 pestañas técnicas) */}
-          <div>
-            <label className="text-[11px] font-heading font-semibold uppercase tracking-wider text-[var(--color-text)] opacity-70 block mb-2">
-              Modalidad de Delimitación Geométrica
+          {/* PASO 0: Tipología de Área (Control vs Peligro) */}
+          <div className="space-y-2">
+            <label className="text-[11px] font-heading font-semibold uppercase tracking-wider text-[var(--color-text)] opacity-70 block">
+              1. Tipología Operativa de la Delimitación
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => setMode('country')}
-                className={`py-2.5 px-3 flex flex-col items-center justify-center gap-1 border transition-all text-center ${
-                  mode === 'country'
-                    ? 'border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] font-semibold text-[var(--color-accent)]'
-                    : 'border-[var(--color-divider)] hover:border-[var(--color-text)] opacity-60 hover:opacity-100'
+                onClick={() => {
+                  setZoneType('RESPONSIBILITY');
+                  setSeverity('OPERATIONAL');
+                }}
+                className={`p-3.5 border text-left flex flex-col justify-between transition-all ${
+                  zoneType === 'RESPONSIBILITY'
+                    ? 'border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] ring-1 ring-[var(--color-accent)] shadow-sm'
+                    : 'border-[var(--color-divider)] bg-[var(--color-bg)] opacity-60 hover:opacity-100 hover:border-[var(--color-text-muted)]'
                 }`}
               >
-                <Globe className="w-4 h-4" />
-                <span className="text-xs uppercase font-heading">1. Por País</span>
-                <span className="text-[9px] font-mono opacity-70">Frontera TopoJSON</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMode('radius')}
-                className={`py-2.5 px-3 flex flex-col items-center justify-center gap-1 border transition-all text-center ${
-                  mode === 'radius'
-                    ? 'border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] font-semibold text-[var(--color-accent)]'
-                    : 'border-[var(--color-divider)] hover:border-[var(--color-text)] opacity-60 hover:opacity-100'
-                }`}
-              >
-                <RadioIcon className="w-4 h-4" />
-                <span className="text-xs uppercase font-heading">2. Región / Radio</span>
-                <span className="text-[9px] font-mono opacity-70">Buffer Geodésico</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMode('freehand')}
-                className={`py-2.5 px-3 flex flex-col items-center justify-center gap-1 border transition-all text-center ${
-                  mode === 'freehand'
-                    ? 'border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] font-semibold text-[var(--color-accent)]'
-                    : 'border-[var(--color-divider)] hover:border-[var(--color-text)] opacity-60 hover:opacity-100'
-                }`}
-              >
-                <Pentagon className="w-4 h-4" />
-                <span className="text-xs uppercase font-heading">3. Polígono Libre</span>
-                <span className="text-[9px] font-mono opacity-70">Vértices WGS84</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Panel de Configuración según Modalidad */}
-          <div className="p-4 bg-[var(--color-surface)] border border-[var(--color-divider)] space-y-4">
-            {mode === 'country' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-heading font-semibold uppercase tracking-wider">
-                    Catálogo de Países Oficiales (Natural Earth 110m)
-                  </span>
-                  <span className="text-[10px] font-mono opacity-60">
-                    {countryList.length} PAÍSES
-                  </span>
-                </div>
-
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-2.5 opacity-50" />
-                  <input
-                    type="text"
-                    placeholder="Filtrar por nombre (ej: Ukraine, Colombia, Nigeria, Iraq, Kenya)..."
-                    value={countrySearch}
-                    onChange={(e) => setCountrySearch(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono placeholder:opacity-40 focus:outline-none focus:border-[var(--color-accent)]"
-                  />
-                </div>
-
-                <div className="max-h-36 overflow-y-auto border border-[var(--color-divider)] divide-y divide-[var(--color-divider)] bg-[var(--color-bg)]">
-                  {countryList.slice(0, 15).map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => handleSelectCountry(c.id, c.name)}
-                      className={`w-full text-left px-3 py-2 text-xs font-mono flex items-center justify-between hover:bg-[color-mix(in_srgb,var(--color-text)_6%,transparent)] transition-colors ${
-                        selectedCountryId === c.id
-                          ? 'bg-[color-mix(in_srgb,var(--color-accent)_15%,transparent)] font-semibold text-[var(--color-accent)]'
-                          : ''
-                      }`}
-                    >
-                      <span>{c.name}</span>
-                      {selectedCountryId === c.id && <Check className="w-3.5 h-3.5" />}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Mandato Claude: Aviso obligatorio de simplificación territorial */}
-                {countryExtraction?.isSimplified && (
-                  <div className="p-3 bg-[color-mix(in_srgb,var(--risk-high)_12%,transparent)] border border-[var(--risk-high)] text-xs text-[var(--color-text)] flex items-start gap-2.5">
-                    <AlertTriangle className="w-4 h-4 text-[var(--risk-high)] shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-heading font-semibold uppercase tracking-wider text-[var(--risk-high)] block">
-                        Aviso Operativo de Delimitación
-                      </span>
-                      <p className="text-[11px] opacity-90 mt-0.5 leading-relaxed">
-                        Esta delimitación representa el territorio continental principal de{' '}
-                        <strong>{selectedCountryName}</strong>.{' '}
-                        <span className="font-mono text-[var(--risk-high)]">
-                          {countryExtraction.excludedCount}
-                        </span>{' '}
-                        enclaves o islas quedan fuera del perímetro geométrico registrado.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {mode === 'radius' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] font-mono uppercase tracking-wider block mb-1 opacity-70">
-                      Longitud Centro (WGS84)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={centerLng}
-                      onChange={(e) => setCenterLng(parseFloat(e.target.value))}
-                      className="w-full px-3 py-1.5 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono uppercase tracking-wider block mb-1 opacity-70">
-                      Latitud Centro (WGS84)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={centerLat}
-                      onChange={(e) => setCenterLat(parseFloat(e.target.value))}
-                      className="w-full px-3 py-1.5 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
-                    />
-                  </div>
-                </div>
-
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[10px] font-mono uppercase tracking-wider opacity-70">
-                      Radio Táctico Operativo
-                    </label>
-                    <span className="text-xs font-mono font-bold text-[var(--color-accent)]">
-                      {radiusKm} km
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-[var(--color-accent)]" />
+                    <span className="text-xs font-heading font-bold uppercase tracking-wider text-[var(--color-text)]">
+                      Zona de Control
                     </span>
                   </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max="100"
-                    step="1"
-                    value={radiusKm}
-                    onChange={(e) => setRadiusKm(parseInt(e.target.value, 10))}
-                    className="w-full accent-[var(--color-accent)] cursor-pointer"
-                  />
-                  <div className="flex justify-between gap-2 mt-2">
-                    {[5, 15, 25, 50, 100].map((val) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setRadiusKm(val)}
-                        className={`px-2 py-1 text-[10px] font-mono border ${
-                          radiusKm === val
-                            ? 'border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_15%,transparent)] text-[var(--color-accent)]'
-                            : 'border-[var(--color-divider)] hover:border-[var(--color-text)] opacity-70'
-                        }`}
-                      >
-                        {val} km
-                      </button>
-                    ))}
-                  </div>
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5 font-sans leading-tight">
+                    Teatro de operaciones o territorio bajo supervisión directa de un RSO. Sin connotación de alarma.
+                  </p>
                 </div>
-              </div>
-            )}
+                <div className="mt-3 pt-2 border-t border-[var(--color-divider)] flex items-center justify-between text-[10px] font-mono text-[var(--color-accent)]">
+                  <span>SEVERIDAD OPERACIONAL</span>
+                  <span className="font-bold">RSO OBLIGATORIO</span>
+                </div>
+              </button>
 
-            {mode === 'freehand' && (
-              <div className="space-y-2">
-                <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block">
-                  Vértices de Polígono (Lng, Lat por línea · Mínimo 3 vértices)
-                </label>
-                <textarea
-                  rows={4}
-                  value={rawCoordinatesText}
-                  onChange={(e) => setRawCoordinatesText(e.target.value)}
-                  className="w-full p-2.5 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono leading-relaxed focus:outline-none focus:border-[var(--color-accent)]"
-                  placeholder="-3.7100, 40.4200&#10;-3.6900, 40.4200&#10;-3.6900, 40.4100&#10;-3.7100, 40.4100"
-                />
-                <span className="text-[10px] font-mono opacity-50 block">
-                  El sistema cierra automáticamente el polígono uniendo el último vértice con el primero.
-                </span>
-              </div>
-            )}
-
-            {/* Ficha métrica de la geometría generada */}
-            <div className="pt-2 border-t border-[var(--color-divider)] flex items-center justify-between text-[11px] font-mono">
-              <span className="opacity-60">Superficie Estimada:</span>
-              <span className="font-bold text-[var(--color-text)]">
-                {estimatedAreaKm2 > 0 ? `${estimatedAreaKm2.toLocaleString()} km²` : '---'}
-              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setZoneType('THREAT');
+                  if (severity === 'OPERATIONAL') setSeverity('AMBER');
+                }}
+                className={`p-3.5 border text-left flex flex-col justify-between transition-all ${
+                  zoneType === 'THREAT'
+                    ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500 shadow-sm'
+                    : 'border-[var(--color-divider)] bg-[var(--color-bg)] opacity-60 hover:opacity-100 hover:border-[var(--color-text-muted)]'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-500" />
+                    <span className="text-xs font-heading font-bold uppercase tracking-wider text-[var(--color-text)]">
+                      Área de Peligro
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5 font-sans leading-tight">
+                    Perímetro táctico con nivel de riesgo o restricciones de paso para personal expatriado.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-[var(--color-divider)] flex items-center justify-between text-[10px] font-mono text-amber-400">
+                  <span>4 NIVELES DE AMENAZA</span>
+                  <span>RSO OPCIONAL</span>
+                </div>
+              </button>
             </div>
           </div>
 
-          {/* Datos Operativos Mandatorios */}
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs font-heading font-semibold uppercase tracking-wider block mb-1">
-                Nombre Operativo del Área *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Ej: Teatro Operativo Donbás, Corredor Logístico Buenaventura..."
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 bg-[var(--color-surface)] border border-[var(--color-divider)] text-sm font-heading placeholder:opacity-40 focus:outline-none focus:border-[var(--color-accent)]"
-              />
-            </div>
+          {/* RSO ASIGNADO */}
+          <div>
+            <label className="text-[11px] font-heading font-semibold uppercase tracking-wider text-[var(--color-text)] opacity-70 flex items-center justify-between mb-1.5">
+              <span className="flex items-center gap-1.5">
+                <UserCheck className="w-3.5 h-3.5 text-[var(--color-accent)]" />
+                RSO Responsable Asignado {zoneType === 'RESPONSIBILITY' ? (
+                  <span className="text-red-400 font-bold">* (Obligatorio)</span>
+                ) : (
+                  <span className="text-[var(--color-text-muted)] font-normal font-mono">(Opcional)</span>
+                )}
+              </span>
+              {isLoadingRsos && <span className="text-[10px] font-mono text-[var(--color-accent)] animate-pulse">Sincronizando oficiales...</span>}
+            </label>
+            <select
+              value={assignedRsoId}
+              onChange={(e) => setAssignedRsoId(e.target.value)}
+              className={`w-full px-3 py-2 bg-[var(--color-surface)] border text-xs font-mono focus:outline-none ${
+                zoneType === 'RESPONSIBILITY' && !assignedRsoId
+                  ? 'border-red-400/80 bg-red-500/5 focus:border-red-400'
+                  : 'border-[var(--color-divider)] focus:border-[var(--color-accent)]'
+              }`}
+            >
+              <option value="">-- Sin RSO asignado --</option>
+              {rsoList.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.full_name} [{r.role}]
+                </option>
+              ))}
+            </select>
+            {zoneType === 'RESPONSIBILITY' && !assignedRsoId && (
+              <p className="text-[11px] text-red-400 font-mono mt-1">
+                ⚠️ Una zona de control requiere asignar al oficial RSO que supervisa el territorio.
+              </p>
+            )}
+          </div>
 
-            {/* Selector de Severidad Táctica */}
+          {/* SELECTOR DE SEVERIDAD (Solo para THREAT) */}
+          {zoneType === 'RESPONSIBILITY' ? (
+            <div className="p-3 border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 text-xs font-mono text-[var(--color-accent)] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-[var(--color-accent)] shrink-0" />
+                <span className="font-bold">SEVERIDAD OPERACIONAL:</span>
+                <span className="text-[var(--color-text)]">Color neutro Industry Steel (#5980a6). Sin rampa de alerta.</span>
+              </div>
+            </div>
+          ) : (
             <div>
-              <label className="text-xs font-heading font-semibold uppercase tracking-wider block mb-2">
-                Clasificación de Severidad y Riesgo *
+              <label className="text-[11px] font-heading font-semibold uppercase tracking-wider text-[var(--color-text)] opacity-70 block mb-2">
+                2. Nivel de Riesgo / Severidad Táctica
               </label>
-              <div className="grid grid-cols-2 gap-2">
-                {(['RED', 'AMBER', 'SAFE_HAVEN', 'CORRIDOR'] as TacticalSeverity[]).map((sev) => {
-                  const conf = SEVERITY_CONFIG[sev];
-                  const isSelected = severity === sev;
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {(['RED', 'AMBER', 'SAFE_HAVEN', 'CORRIDOR'] as TacticalSeverity[]).map((sevKey) => {
+                  const cfg = SEVERITY_CONFIG[sevKey];
+                  const isSelected = severity === sevKey;
+
                   return (
                     <button
-                      key={sev}
+                      key={sevKey}
                       type="button"
-                      onClick={() => setSeverity(sev)}
-                      className={`p-3 text-left border transition-all flex flex-col justify-between ${
+                      onClick={() => setSeverity(sevKey)}
+                      className={`p-3 text-left border transition-all relative ${
                         isSelected
                           ? 'border-[var(--color-text)] bg-[color-mix(in_srgb,var(--color-text)_8%,transparent)] shadow-sm'
-                          : 'border-[var(--color-divider)] opacity-60 hover:opacity-100 bg-[var(--color-surface)]'
+                          : 'border-[var(--color-divider)] hover:border-[var(--color-text)] opacity-60 hover:opacity-100'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1">
+                      {isSelected && (
                         <span
-                          className="text-xs font-heading font-bold uppercase tracking-wider"
-                          style={{ color: conf.color }}
-                        >
-                          {conf.label}
-                        </span>
-                        <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 border border-[var(--color-divider)]">
-                          {conf.kicker}
+                          className="absolute top-0 left-0 right-0 h-0.5"
+                          style={{ backgroundColor: cfg.color }}
+                        />
+                      )}
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: cfg.color }}
+                        />
+                        <span className="text-xs font-heading font-bold uppercase tracking-wider">
+                          {cfg.label}
                         </span>
                       </div>
-                      <span className="text-[10px] leading-relaxed opacity-75">{conf.desc}</span>
+                      <span className="text-[9px] font-mono uppercase tracking-wider opacity-70 block">
+                        {cfg.kicker}
+                      </span>
                     </button>
                   );
                 })}
               </div>
             </div>
+          )}
 
+          {/* MODO EDICIÓN: NOTA DE GEOMETRÍA */}
+          {isEditMode ? (
+            <div className="p-3 border border-[var(--color-divider)] bg-[var(--color-surface)] text-xs font-mono opacity-80 flex items-center gap-2">
+              <Shield className="w-4 h-4 text-[var(--color-accent)] shrink-0" />
+              <span>
+                Geometría fija registrada ({initialZone?.geometry?.type || 'POLYGON'}). Para redibujar el polígono, elimine esta zona y créela de nuevo.
+              </span>
+            </div>
+          ) : (
+            <>
+              {/* SELECTOR DE MODALIDAD GEOMÉTRICA (3 pestañas) */}
+              <div>
+                <label className="text-[11px] font-heading font-semibold uppercase tracking-wider text-[var(--color-text)] opacity-70 block mb-2">
+                  3. Modalidad de Delimitación Geométrica
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMode('country')}
+                    className={`py-2.5 px-3 flex flex-col items-center justify-center gap-1 border transition-all text-center ${
+                      mode === 'country'
+                        ? 'border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] font-semibold text-[var(--color-accent)]'
+                        : 'border-[var(--color-divider)] hover:border-[var(--color-text)] opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <Globe className="w-4 h-4" />
+                    <span className="text-xs uppercase font-heading">1. Por País</span>
+                    <span className="text-[9px] font-mono opacity-70">Frontera TopoJSON</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMode('radius')}
+                    className={`py-2.5 px-3 flex flex-col items-center justify-center gap-1 border transition-all text-center ${
+                      mode === 'radius'
+                        ? 'border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] font-semibold text-[var(--color-accent)]'
+                        : 'border-[var(--color-divider)] hover:border-[var(--color-text)] opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <RadioIcon className="w-4 h-4" />
+                    <span className="text-xs uppercase font-heading">2. Región / Radio</span>
+                    <span className="text-[9px] font-mono opacity-70">Buffer Geodésico</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMode('freehand')}
+                    className={`py-2.5 px-3 flex flex-col items-center justify-center gap-1 border transition-all text-center ${
+                      mode === 'freehand'
+                        ? 'border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] font-semibold text-[var(--color-accent)]'
+                        : 'border-[var(--color-divider)] hover:border-[var(--color-text)] opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <Pentagon className="w-4 h-4" />
+                    <span className="text-xs uppercase font-heading">3. Polígono Libre</span>
+                    <span className="text-[9px] font-mono opacity-70">Vértices WGS84</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Panel de configuración según la modalidad activa */}
+              <div className="border border-[var(--color-divider)] bg-[var(--color-surface)] p-4">
+                {mode === 'country' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-heading font-semibold uppercase tracking-wider">
+                        Selección Territorial por País
+                      </span>
+                      <span className="text-[10px] font-mono opacity-60">Natural Earth 110m WGS84</span>
+                    </div>
+
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-2.5 text-[var(--color-text)] opacity-50" />
+                      <input
+                        type="text"
+                        placeholder="Buscar país (ej: Malí, Níger, Ucrania, España...)"
+                        value={countrySearch}
+                        onChange={(e) => setCountrySearch(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
+                      />
+                    </div>
+
+                    <div className="max-h-40 overflow-y-auto border border-[var(--color-divider)] bg-[var(--color-bg)] divide-y divide-[var(--color-divider)]">
+                      {countryList.length === 0 ? (
+                        <div className="p-3 text-center text-xs opacity-60 font-mono">
+                          No se encontraron países que coincidan con la búsqueda.
+                        </div>
+                      ) : (
+                        countryList.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => handleSelectCountry(c.id, c.name)}
+                            className={`w-full text-left px-3 py-1.5 text-xs font-mono flex items-center justify-between hover:bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)] transition-colors ${
+                              selectedCountryId === c.id
+                                ? 'bg-[color-mix(in_srgb,var(--color-accent)_15%,transparent)] font-bold text-[var(--color-accent)]'
+                                : 'opacity-80'
+                            }`}
+                          >
+                            <span>{c.name}</span>
+                            <span className="text-[10px] opacity-50">ID: {c.id}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Aviso obligatorio si el país es archipiélago o tiene enclaves excluidos */}
+                    {countryExtraction?.isSimplified && (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-mono space-y-1">
+                        <div className="font-bold flex items-center gap-1.5">
+                          <span>⚠️</span>
+                          <span>AVISO OPERATIVO DE DELIMITACIÓN</span>
+                        </div>
+                        <div>
+                          Esta delimitación representa el territorio continental principal de {selectedCountryName}. 
+                          {countryExtraction.excludedCount > 0 && ` ${countryExtraction.excludedCount} enclaves o islas quedan fuera del perímetro geométrico registrado.`}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {mode === 'radius' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-heading font-semibold uppercase tracking-wider">
+                        Buffer Geodésico Regular (64 vértices esféricos)
+                      </span>
+                      <span className="text-[10px] font-mono opacity-60">Radio: {radiusKm} km</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-mono opacity-70 block mb-1">
+                          Longitud Centro (WGS84)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          value={centerLng}
+                          onChange={(e) => setCenterLng(parseFloat(e.target.value) || 0)}
+                          className="w-full px-3 py-1.5 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono opacity-70 block mb-1">
+                          Latitud Centro (WGS84)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          value={centerLat}
+                          onChange={(e) => setCenterLat(parseFloat(e.target.value) || 0)}
+                          className="w-full px-3 py-1.5 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-xs font-mono mb-1">
+                        <span className="opacity-70">Radio del Perímetro:</span>
+                        <span className="font-bold text-[var(--color-accent)]">{radiusKm} km</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="100"
+                        step="1"
+                        value={radiusKm}
+                        onChange={(e) => setRadiusKm(parseInt(e.target.value, 10))}
+                        className="w-full accent-[var(--color-accent)] cursor-pointer"
+                      />
+                      <div className="flex justify-between text-[9px] font-mono opacity-50 mt-1">
+                        <span>1 km (Local)</span>
+                        <span>25 km (Metropolitano)</span>
+                        <span>50 km (Sector)</span>
+                        <span>100 km (Teatro Regional)</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {mode === 'freehand' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-heading font-semibold uppercase tracking-wider">
+                        Trazado Vectorial Libre (WGS84)
+                      </span>
+                      <span className="text-[10px] font-mono opacity-60">Formato: Lng, Lat (un vértice por línea)</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={rawCoordinatesText}
+                      onChange={(e) => setRawCoordinatesText(e.target.value)}
+                      placeholder="-3.7100, 40.4200&#10;-3.6900, 40.4200&#10;-3.6900, 40.4100&#10;-3.7100, 40.4100"
+                      className="w-full p-2 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
+                    />
+                    <span className="text-[10px] font-mono opacity-60 block">
+                      * El sistema cierra determinísticamente el primer y último punto conforme al estándar RFC 7946.
+                    </span>
+                  </div>
+                )}
+
+                {/* HUD de Telemetría Geométrica */}
+                {activeGeometry && (
+                  <div className="mt-3 pt-3 border-t border-[var(--color-divider)] flex items-center justify-between text-[11px] font-mono">
+                    <span className="opacity-70">Superficie Delimitada:</span>
+                    <span className="font-bold text-[var(--color-accent)]">
+                      {approximateAreaKm2.toLocaleString('es-ES', { maximumFractionDigits: 1 })} km²
+                    </span>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* DATOS GENERALES DEL ÁREA */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-heading font-semibold uppercase tracking-wider block mb-1">
-                Descripción Táctica y Reglas de Empeño
+              <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-1">
+                Nombre del Área Táctica *
               </label>
-              <textarea
-                rows={2}
-                placeholder="Directivas de movimiento, restricciones específicas o condiciones de seguridad..."
+              <input
+                type="text"
+                placeholder="Ej: Teatro Operativo Malí / Corredor N6"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                className="w-full px-3 py-2 bg-[var(--color-surface)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-1">
+                Descripción / Directiva Operativa
+              </label>
+              <input
+                type="text"
+                placeholder="Ej: Supervisión integral de expatriados y proyectos en Bamako"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-3 py-2 bg-[var(--color-surface)] border border-[var(--color-divider)] text-xs leading-relaxed placeholder:opacity-40 focus:outline-none focus:border-[var(--color-accent)]"
+                className="w-full px-3 py-2 bg-[var(--color-surface)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
               />
             </div>
           </div>
 
-          {/* Acordeón de Parámetros Tácticos Avanzados */}
-          <div className="border border-[var(--color-divider)]">
+          {/* PARÁMETROS TÁCTICOS AVANZADOS */}
+          <div className="border border-[var(--color-divider)] bg-[var(--color-surface)]">
             <button
               type="button"
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full px-4 py-2.5 bg-[var(--color-surface)] flex items-center justify-between text-xs font-heading font-semibold uppercase tracking-wider hover:bg-[color-mix(in_srgb,var(--color-text)_6%,transparent)] transition-colors"
+              className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-heading font-semibold uppercase tracking-wider hover:bg-[color-mix(in_srgb,var(--color-text)_5%,transparent)]"
             >
               <span className="flex items-center gap-2">
                 <Clock className="w-3.5 h-3.5 text-[var(--color-accent)]" />
-                Parámetros Tácticos Avanzados (Buffer, Toque de Queda, Radio)
+                Parámetros Tácticos Avanzados (Buffer, Toque de Queda, Comunicaciones)
               </span>
               {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
 
             {showAdvanced && (
-              <div className="p-4 space-y-4 bg-[var(--color-bg)] border-t border-[var(--color-divider)]">
-                {/* Buffer de proximidad */}
+              <div className="p-4 border-t border-[var(--color-divider)] space-y-4 bg-[var(--color-bg)]">
+                {/* Buffer de Proximidad */}
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-70">
-                      Margen de Proximidad / Buffer (metros)
-                    </label>
-                    <span className="text-xs font-mono font-bold">{bufferMeters} m</span>
+                  <div className="flex justify-between text-xs font-mono mb-1">
+                    <span className="opacity-70">Buffer de Advertencia Perimetral:</span>
+                    <span className="font-bold text-[var(--color-accent)]">{bufferMeters} metros</span>
                   </div>
                   <input
                     type="range"
                     min="0"
                     max="5000"
-                    step="50"
+                    step="100"
                     value={bufferMeters}
                     onChange={(e) => setBufferMeters(parseInt(e.target.value, 10))}
-                    className="w-full accent-[var(--color-accent)]"
+                    className="w-full accent-[var(--color-accent)] cursor-pointer"
                   />
-                  <span className="text-[10px] font-mono opacity-50 block mt-1">
-                    Dispara pre-alerta de geofencing al aproximarse a esta distancia del perímetro.
+                  <span className="text-[9px] font-mono opacity-50 block mt-1">
+                    Dispara pre-alertas cuando un viajero se aproxima al perímetro antes de cruzarlo.
                   </span>
                 </div>
 
                 {/* Toque de Queda */}
                 <div className="pt-3 border-t border-[var(--color-divider)] space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-heading font-semibold uppercase tracking-wider flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={isCurfew}
-                        onChange={(e) => setIsCurfew(e.target.checked)}
-                        className="w-4 h-4 accent-[var(--color-accent)]"
-                      />
-                      Activar Restricción de Toque de Queda (Curfew)
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="is-curfew"
+                      checked={isCurfew}
+                      onChange={(e) => setIsCurfew(e.target.checked)}
+                      className="accent-[var(--color-accent)]"
+                    />
+                    <label htmlFor="is-curfew" className="text-xs font-heading font-semibold uppercase cursor-pointer select-none">
+                      Activar Restricción Horaria (Toque de Queda)
                     </label>
-                    {isCurfew && (
-                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 bg-[color-mix(in_srgb,var(--risk-high)_20%,transparent)] text-[var(--risk-high)] font-bold">
-                        RESTRICCIÓN ACTIVA
-                      </span>
-                    )}
                   </div>
 
                   {isCurfew && (
-                    <div className="grid grid-cols-2 gap-3 pl-6">
+                    <div className="grid grid-cols-2 gap-3 pl-5 border-l-2 border-[var(--color-accent)]">
                       <div>
                         <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-1">
-                          Hora Inicio (UTC)
+                          Hora Inicio Restricción
                         </label>
                         <input
                           type="time"
@@ -646,7 +909,7 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
                       </div>
                       <div>
                         <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-1">
-                          Hora Fin (UTC)
+                          Hora Fin Restricción
                         </label>
                         <input
                           type="time"
@@ -729,18 +992,18 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !activeGeometry || !name.trim()}
+              disabled={isSubmitting || (!isEditMode && !activeGeometry) || !name.trim()}
               className="px-5 py-2 bg-[var(--color-accent)] text-white text-xs font-heading font-bold uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm"
             >
               {isSubmitting ? (
                 <>
                   <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Registrando en PostGIS...
+                  {isEditMode ? 'Actualizando Área...' : 'Registrando en PostGIS...'}
                 </>
               ) : (
                 <>
                   <Check className="w-4 h-4" />
-                  Confirmar y Crear Área Táctica
+                  {isEditMode ? 'Guardar Cambios' : 'Confirmar y Crear Área Táctica'}
                 </>
               )}
             </button>

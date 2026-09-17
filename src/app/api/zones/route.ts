@@ -22,11 +22,19 @@ export async function GET(request: NextRequest) {
     // Consulta con cliente de sesión: RLS filtra automáticamente por la organización del usuario
     const { data: zones, error } = await supabase
       .from('zones')
-      .select('id, organization_id, assigned_rso_id, name, description, severity, color_hex, buffer_meters, is_curfew, curfew_start, curfew_end, contact_phone, radio_frequency, gate_access_protocol, valid_from, valid_until, is_active, created_at, geom')
-      .eq('is_active', true);
+      .select(`
+        id, organization_id, assigned_rso_id, zone_type, name, description, severity, color_hex,
+        buffer_meters, is_curfew, curfew_start, curfew_end, contact_phone, radio_frequency,
+        gate_access_protocol, valid_until, geom
+      `)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json(
+        { error: `Error al consultar zonas: ${error.message}` },
+        { status: 500 }
+      );
     }
 
     // Convertir a GeoJSON FeatureCollection para consumo en MapLibre GL
@@ -50,6 +58,7 @@ export async function GET(request: NextRequest) {
             id: zone.id,
             organization_id: zone.organization_id,
             assigned_rso_id: zone.assigned_rso_id ?? null,
+            zone_type: zone.zone_type ?? 'THREAT',
             name: zone.name,
             description: zone.description,
             severity: zone.severity,
@@ -107,19 +116,33 @@ export async function POST(request: NextRequest) {
       radio_frequency,
       gate_access_protocol,
       assigned_rso_id,
+      zone_type: rawZoneType,
     } = body;
+
+    const zone_type = rawZoneType === 'RESPONSIBILITY' ? 'RESPONSIBILITY' : 'THREAT';
 
     // Validación de campos obligatorios
     if (!name || typeof name !== 'string' || name.trim() === '') {
       return NextResponse.json({ error: 'El campo "name" es obligatorio.' }, { status: 400 });
     }
 
-    const allowedSeverities = ['RED', 'AMBER', 'SAFE_HAVEN', 'CORRIDOR'];
-    if (!severity || !allowedSeverities.includes(severity)) {
-      return NextResponse.json(
-        { error: `Severidad inválida: '${severity}'. Debe ser una de: ${allowedSeverities.join(', ')}.` },
-        { status: 400 }
-      );
+    let resolvedSeverity = severity;
+    if (zone_type === 'RESPONSIBILITY') {
+      if (!assigned_rso_id) {
+        return NextResponse.json(
+          { error: 'Para zonas de responsabilidad operativa (RESPONSIBILITY) es obligatorio asignar un RSO.' },
+          { status: 400 }
+        );
+      }
+      resolvedSeverity = 'OPERATIONAL';
+    } else {
+      const allowedSeverities = ['RED', 'AMBER', 'SAFE_HAVEN', 'CORRIDOR'];
+      if (!resolvedSeverity || !allowedSeverities.includes(resolvedSeverity)) {
+        return NextResponse.json(
+          { error: `Severidad inválida para zona de peligro: '${resolvedSeverity}'. Debe ser una de: ${allowedSeverities.join(', ')}.` },
+          { status: 400 }
+        );
+      }
     }
 
     if (!geojson_geometry) {
@@ -164,8 +187,8 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabase.rpc('create_zone_with_geojson', {
       p_name: name.trim(),
       p_description: description ? description.trim() : null,
-      p_severity: severity,
-      p_color_hex: color_hex || null,
+      p_severity: resolvedSeverity,
+      p_color_hex: zone_type === 'RESPONSIBILITY' ? '#5980a6' : (color_hex || null),
       p_geojson: geometryString,
       p_valid_until: valid_until || null,
       p_buffer_meters: buffer_meters !== undefined ? buffer_meters : 0,
@@ -176,6 +199,7 @@ export async function POST(request: NextRequest) {
       p_radio_frequency: radio_frequency ? String(radio_frequency).trim() : null,
       p_gate_access_protocol: gate_access_protocol ? String(gate_access_protocol).trim() : null,
       p_assigned_rso_id: assigned_rso_id || null,
+      p_zone_type: zone_type,
     });
 
     if (error) {
@@ -195,6 +219,7 @@ export async function POST(request: NextRequest) {
       entity_id: data.id,
       payload: {
         name: data.name,
+        zone_type: data.zone_type,
         severity: data.severity,
         assigned_rso_id: data.assigned_rso_id || null,
         buffer_meters: data.buffer_meters,

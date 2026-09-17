@@ -9,6 +9,7 @@ interface BlueprintPlateProps {
   title?: string;
   headerRight?: React.ReactNode;
   noCorners?: boolean;
+  variant?: string;
 }
 
 export const BlueprintPlate: React.FC<BlueprintPlateProps> = ({
@@ -18,6 +19,7 @@ export const BlueprintPlate: React.FC<BlueprintPlateProps> = ({
   title,
   headerRight,
   noCorners = false,
+  variant,
 }) => {
   return (
     <div className={`plate relative ${className}`}>

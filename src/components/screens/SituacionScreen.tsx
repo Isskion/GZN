@@ -13,97 +13,29 @@ import {
   Clock,
   Radio,
   ExternalLink,
+  Layers,
+  RefreshCw,
 } from 'lucide-react';
 import { BlueprintPlate } from '@/components/industry/BlueprintPlate';
-import { IncidentTape, IncidentItem } from '@/components/industry/IncidentTape';
-
-export interface CountryData {
-  id: string; // ISO 3166 numeric id matching TopoJSON
-  name: string;
-  city: string;
-  tier: 'crit' | 'high' | 'watch' | 'stable';
-  note: string;
-  haven: string;
-  peopleCount: number;
-}
-
-const COUNTRIES_SPEC: CountryData[] = [
-  { id: '368', name: 'Irak', city: 'Bagdad', tier: 'crit', note: 'Escolta obligatoria. Movimiento nocturno prohibido.', haven: 'Complejo diplomático · Zona Verde', peopleCount: 2 },
-  { id: '466', name: 'Malí', city: 'Bamako', tier: 'crit', note: 'Riesgo de secuestro en carretera N6. Solo vuelo interno.', haven: 'Base MINUSMA · Sévaré', peopleCount: 1 },
-  { id: '804', name: 'Ucrania', city: 'Kiev', tier: 'crit', note: 'Alarma aérea activa 3 veces en 24 h.', haven: 'Refugio Lukianivska', peopleCount: 1 },
-  { id: '404', name: 'Kenia', city: 'Nairobi', tier: 'high', note: 'Manifestaciones en CBD. Toque de queda no oficial 20:00.', haven: 'Embajada · Gigiri', peopleCount: 4 },
-  { id: '566', name: 'Nigeria', city: 'Lagos', tier: 'high', note: 'Robo con violencia en Victoria Island tras el anochecer.', haven: 'Hotel homologado · Ikoyi', peopleCount: 1 },
-  { id: '170', name: 'Colombia', city: 'Bogotá', tier: 'watch', note: 'Paro de transporte previsto el jueves.', haven: 'Oficina regional · Chapinero', peopleCount: 1 },
-  { id: '484', name: 'México', city: 'CDMX', tier: 'watch', note: 'Extorsión telefónica al alza en el sector.', haven: 'Oficina regional · Polanco', peopleCount: 1 },
-  { id: '360', name: 'Indonesia', city: 'Yakarta', tier: 'watch', note: 'Inundación estacional en Kelapa Gading.', haven: 'Hotel homologado · Sudirman', peopleCount: 1 },
-  { id: '710', name: 'Sudáfrica', city: 'Johannesburgo', tier: 'stable', note: 'Sin incidencias en 30 días.', haven: 'Oficina · Sandton', peopleCount: 1 },
-  { id: '784', name: 'Emiratos Árabes', city: 'Dubái', tier: 'stable', note: 'Sin incidencias en 30 días.', haven: 'Oficina · DIFC', peopleCount: 1 },
-];
-
-const TIER_COLORS: Record<CountryData['tier'], string> = {
-  crit: 'var(--risk-crit)',
-  high: 'var(--risk-high)',
-  watch: 'var(--risk-watch)',
-  stable: 'var(--risk-stable)',
-};
-
-const TIER_LABELS: Record<CountryData['tier'], string> = {
-  crit: 'CRÍTICO',
-  high: 'ALTO',
-  watch: 'ATENCIÓN',
-  stable: 'NOMINAL',
-};
+import { ZoneType, ZoneSeverity } from '@/types/database';
 
 interface SituacionScreenProps {
-  onSelectIncident?: (incident: IncidentItem) => void;
   onNavigateTerreno?: () => void;
 }
 
 export const SituacionScreen: React.FC<SituacionScreenProps> = ({
-  onSelectIncident,
   onNavigateTerreno,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const [selectedCountryId, setSelectedCountryId] = useState<string | null>('404');
   const [worldTopology, setWorldTopology] = useState<any>(null);
+  const [zonesData, setZonesData] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [travelersCount, setTravelersCount] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
 
-  const incidents: IncidentItem[] = [
-    {
-      id: 'inc-01',
-      title: 'Incursión Perímetro Norte',
-      detail: 'Telemetría detecta cruce de geocerca en zona hostil de exclusión militar.',
-      time: '19:42:10',
-      severity: 'CRIT',
-      targetCallsign: 'CONVOY-ALFA',
-    },
-    {
-      id: 'inc-02',
-      title: 'Disparo Botón SOS de Pánico',
-      detail: 'Pulsador táctico activado manualmente por sujeto protegido VIP.',
-      time: '19:38:05',
-      severity: 'CRIT',
-      targetCallsign: 'VIP-BRAVO',
-    },
-    {
-      id: 'inc-03',
-      title: 'Batería Crítica < 15%',
-      detail: 'Baliza de posicionamiento en umbral de desconexión inminente.',
-      time: '19:15:22',
-      severity: 'HIGH',
-      targetCallsign: 'MED-DELTA',
-    },
-    {
-      id: 'inc-04',
-      title: 'Paso por Checkpoint Alpha',
-      detail: 'Acuse de paso confirmado sin novedades ni demoras operativas.',
-      time: '18:50:00',
-      severity: 'STABLE',
-      targetCallsign: 'LOG-CHARLIE',
-    },
-  ];
-
-  // Cargar TopoJSON una sola vez
+  // Cargar TopoJSON cartográfico base
   useEffect(() => {
     fetch('/data/countries-110m.json')
       .then((res) => res.json())
@@ -111,7 +43,43 @@ export const SituacionScreen: React.FC<SituacionScreenProps> = ({
       .catch((err) => console.error('Error al cargar TopoJSON:', err));
   }, []);
 
-  // Dibujar mapa D3 Natural Earth
+  // Cargar Zonas reales desde GET /api/zones y Viajeros desde GET /api/travelers
+  const loadRealData = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [zonesRes, travelersRes] = await Promise.all([
+        fetch('/api/zones'),
+        fetch('/api/travelers?limit=100'),
+      ]);
+
+      if (zonesRes.ok) {
+        const data = await zonesRes.json();
+        setZonesData(data);
+        if (data.features && data.features.length > 0 && !selectedZoneId) {
+          setSelectedZoneId(data.features[0].id || data.features[0].properties?.id);
+        }
+      }
+
+      if (travelersRes.ok) {
+        const travData = await travelersRes.json();
+        setTravelersCount((travData.data || []).length);
+      }
+    } catch (err: any) {
+      console.error('Error cargando datos reales en SituacionScreen:', err);
+      setError('Fallo de conexión al cargar las áreas operativas del servidor.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRealData();
+  }, []);
+
+  const features = zonesData?.features || [];
+
+  // Dibujar mapa D3 Natural Earth con las geometrías de zonas reales proyectadas
   useEffect(() => {
     const host = mapContainerRef.current;
     if (!host || !worldTopology) return;
@@ -151,7 +119,7 @@ export const SituacionScreen: React.FC<SituacionScreenProps> = ({
       .attr('d', pathGenerator({ type: 'Sphere' }) as string)
       .attr('fill', 'none')
       .attr('stroke', 'var(--color-text)')
-      .attr('stroke-opacity', 0.2);
+      .attr('stroke-opacity', 0.15);
 
     // Retícula (graticule)
     svg
@@ -159,80 +127,118 @@ export const SituacionScreen: React.FC<SituacionScreenProps> = ({
       .attr('d', pathGenerator(d3.geoGraticule10()) as string)
       .attr('fill', 'none')
       .attr('stroke', 'var(--color-text)')
-      .attr('stroke-opacity', 0.08);
+      .attr('stroke-opacity', 0.06);
 
-    const byId = Object.fromEntries(COUNTRIES_SPEC.map((c) => [c.id, c]));
-
-    // Polígonos de países
+    // 1. Capa base de países (siluetas neutras continuas)
     svg
       .append('g')
       .selectAll('path')
       .data(feats)
       .join('path')
       .attr('d', pathGenerator as any)
-      .attr('fill', (d: any) => (byId[d.id] ? TIER_COLORS[byId[d.id].tier] : 'none'))
-      .attr('fill-opacity', (d: any) => {
-        if (!byId[d.id]) return 0;
-        if (selectedCountryId && selectedCountryId !== d.id) return 0.35;
-        return 0.82;
-      })
+      .attr('fill', 'color-mix(in srgb, var(--color-surface) 60%, transparent)')
       .attr('stroke', 'var(--color-text)')
-      .attr('stroke-opacity', (d: any) => (byId[d.id] ? 0.6 : 0.18))
-      .attr('stroke-width', (d: any) => (selectedCountryId === d.id ? 1.4 : 0.7))
-      .style('cursor', (d: any) => (byId[d.id] ? 'pointer' : 'default'))
-      .on('mousemove', (e: MouseEvent, d: any) => {
-        const c = byId[d.id];
-        if (!c) return;
-        setTooltip({
-          x: e.clientX + 12,
-          y: e.clientY - 10,
-          text: `${c.name} · ${TIER_LABELS[c.tier]} · ${c.peopleCount} personas`,
+      .attr('stroke-opacity', 0.12)
+      .attr('stroke-width', 0.6);
+
+    // 2. Proyección de ZONAS REALES del tenant
+    if (features.length > 0) {
+      const zoneGroup = svg.append('g').attr('class', 'gzn-real-zones');
+
+      zoneGroup
+        .selectAll('path')
+        .data(features)
+        .join('path')
+        .attr('d', pathGenerator as any)
+        .attr('fill', (d: any) => {
+          const isResp = d.properties?.zone_type === 'RESPONSIBILITY';
+          if (isResp) return '#5980a6';
+          const sev = d.properties?.severity;
+          if (sev === 'RED') return 'var(--risk-crit)';
+          if (sev === 'AMBER') return 'var(--risk-high)';
+          if (sev === 'SAFE_HAVEN') return 'var(--risk-stable)';
+          if (sev === 'CORRIDOR') return 'var(--risk-watch)';
+          return '#5980a6';
+        })
+        .attr('fill-opacity', (d: any) => {
+          const isSelected = (d.id || d.properties?.id) === selectedZoneId;
+          const isResp = d.properties?.zone_type === 'RESPONSIBILITY';
+          if (isResp) return isSelected ? 0.35 : 0.18;
+          return isSelected ? 0.65 : 0.40;
+        })
+        .attr('stroke', (d: any) => {
+          const isResp = d.properties?.zone_type === 'RESPONSIBILITY';
+          if (isResp) return '#5980a6';
+          const sev = d.properties?.severity;
+          if (sev === 'RED') return 'var(--risk-crit)';
+          if (sev === 'AMBER') return 'var(--risk-high)';
+          return '#5980a6';
+        })
+        .attr('stroke-opacity', 0.85)
+        .attr('stroke-width', (d: any) => {
+          const isSelected = (d.id || d.properties?.id) === selectedZoneId;
+          return isSelected ? 2.2 : 1.2;
+        })
+        .style('cursor', 'pointer')
+        .on('mousemove', (e: MouseEvent, d: any) => {
+          const p = d.properties || {};
+          const isResp = p.zone_type === 'RESPONSIBILITY';
+          setTooltip({
+            x: e.clientX + 12,
+            y: e.clientY - 10,
+            text: `${p.name || 'Área'} · [${isResp ? 'CONTROL' : p.severity}]`,
+          });
+        })
+        .on('mouseleave', () => setTooltip(null))
+        .on('click', (_: MouseEvent, d: any) => {
+          const zId = d.id || d.properties?.id;
+          setSelectedZoneId((prev) => (prev === zId ? null : zId));
         });
-      })
-      .on('mouseleave', () => setTooltip(null))
-      .on('click', (_: MouseEvent, d: any) => {
-        if (byId[d.id]) {
-          setSelectedCountryId((prev) => (prev === d.id ? null : d.id));
-        }
-      });
 
-    // Marcadores con conteo de personal en centroides
-    const countryCentroids = COUNTRIES_SPEC.map((c) => {
-      const f = feats.find((feat: any) => feat.id === c.id);
-      if (!f) return null;
-      const p = pathGenerator.centroid(f);
-      return { ...c, x: p[0], y: p[1] };
-    }).filter(Boolean);
+      // 3. Marcadores de centroides en zonas reales para facilitar selección táctica
+      const centroids = features
+        .map((f: any) => {
+          try {
+            const p = pathGenerator.centroid(f);
+            if (!isNaN(p[0]) && !isNaN(p[1])) {
+              return { f, x: p[0], y: p[1] };
+            }
+          } catch {
+            return null;
+          }
+          return null;
+        })
+        .filter(Boolean);
 
-    const markerGroup = svg
-      .append('g')
-      .selectAll('g')
-      .data(countryCentroids)
-      .join('g')
-      .attr('transform', (c: any) => `translate(${c.x},${c.y})`)
-      .style('cursor', 'pointer')
-      .on('click', (_: MouseEvent, c: any) => setSelectedCountryId(c.id));
+      const markers = svg
+        .append('g')
+        .selectAll('g')
+        .data(centroids)
+        .join('g')
+        .attr('transform', (c: any) => `translate(${c.x},${c.y})`)
+        .style('cursor', 'pointer')
+        .on('click', (_: MouseEvent, c: any) => {
+          setSelectedZoneId(c.f.id || c.f.properties?.id);
+        });
 
-    markerGroup
-      .append('circle')
-      .attr('r', 3.5)
-      .attr('fill', 'var(--color-bg)')
-      .attr('stroke', 'var(--color-text)')
-      .attr('stroke-width', 1.2);
+      markers
+        .append('circle')
+        .attr('r', 4)
+        .attr('fill', (c: any) => (c.f.properties?.zone_type === 'RESPONSIBILITY' ? '#5980a6' : 'var(--risk-high)'))
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 1.2);
+    }
+  }, [worldTopology, zonesData, selectedZoneId, features]);
 
-    markerGroup
-      .append('text')
-      .attr('x', 7)
-      .attr('y', 3.5)
-      .attr('font-size', 10)
-      .attr('font-family', 'var(--font-mono)')
-      .attr('font-weight', 'bold')
-      .attr('fill', 'var(--color-text)')
-      .attr('opacity', 0.85)
-      .text((c: any) => c.peopleCount);
-  }, [worldTopology, selectedCountryId]);
+  const selectedZone = features.find(
+    (f: any) => (f.id || f.properties?.id) === selectedZoneId
+  );
+  const selectedProps = selectedZone?.properties;
+  const isSelectedControl = selectedProps?.zone_type === 'RESPONSIBILITY';
 
-  const selectedCountry = COUNTRIES_SPEC.find((c) => c.id === selectedCountryId);
+  // Contadores agregados
+  const controlZonesCount = features.filter((f: any) => f.properties?.zone_type === 'RESPONSIBILITY').length;
+  const threatZonesCount = features.filter((f: any) => f.properties?.zone_type !== 'RESPONSIBILITY').length;
 
   return (
     <div className="situacion flex flex-col h-full min-h-0 bg-[var(--color-bg)] text-[var(--color-text)] p-4 gap-4 overflow-y-auto font-body">
@@ -246,174 +252,208 @@ export const SituacionScreen: React.FC<SituacionScreenProps> = ({
         </div>
       )}
 
-      {/* Cabecera Informativa con Rótulo Explícito de Simulación */}
+      {/* Cabecera Informativa Conectada */}
       <div className="flex items-center justify-between border-b border-[var(--color-divider)] pb-3 flex-none">
-        <div>
-          <span className="kicker">Panorama Estratégico Global</span>
-          <h2 className="font-heading font-semibold text-lg m-0 tracking-wide uppercase">
-            Consola Macro de Operaciones y Teatros
-          </h2>
+        <div className="flex items-center gap-3">
+          <Globe className="w-5 h-5 text-[var(--color-accent)]" />
+          <div>
+            <h1 className="font-heading text-base font-semibold uppercase tracking-wide">
+              Situación Global // Teatros Operativos y Áreas Tácticas
+            </h1>
+            <p className="text-xs text-[var(--color-text-muted)] font-mono">
+              Consolidación cartográfica WGS84 de zonas activas registradas en la organización
+            </p>
+          </div>
         </div>
-        <div className="tag tag-watch text-xs font-semibold font-mono">
-          VISTA MACRO: DATOS DE MUESTRA (SIMULACIÓN OPSEC)
+
+        <div className="flex items-center gap-4 text-xs font-mono">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[var(--color-accent)]" />
+            <span>Teatros de Control: <b>{controlZonesCount}</b></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-500" />
+            <span>Áreas de Peligro: <b>{threatZonesCount}</b></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Users className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+            <span>Viajeros Monitoreados: <b>{travelersCount}</b></span>
+          </div>
+          <button
+            type="button"
+            onClick={loadRealData}
+            title="Refrescar datos"
+            className="p-1 border border-[var(--color-divider)] hover:bg-[var(--color-surface)] text-[var(--color-text-muted)]"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
       </div>
 
-      {/* Panel Superior: KPIs de Situación Global */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 flex-none">
-        <BlueprintPlate className="p-3 bg-[color-mix(in_srgb,var(--color-surface)_40%,transparent)]">
-          <span className="kicker">Personal en Tránsito</span>
-          <b className="block font-heading text-3xl font-semibold mt-1">14</b>
-          <span className="text-[10px] opacity-60 font-mono">10 TEATROS CON COBERTURA</span>
-        </BlueprintPlate>
-
-        <BlueprintPlate className="p-3 bg-[color-mix(in_srgb,var(--color-surface)_40%,transparent)]">
-          <span className="kicker text-[var(--risk-crit)]">En Riesgo Crítico</span>
-          <b className="block font-heading text-3xl font-semibold mt-1 text-[var(--risk-crit)]">4</b>
-          <span className="text-[10px] opacity-60 font-mono">IRAK · MALÍ · UCRANIA</span>
-        </BlueprintPlate>
-
-        <BlueprintPlate className="p-3 bg-[color-mix(in_srgb,var(--color-surface)_40%,transparent)]">
-          <span className="kicker">Geocercas Activas</span>
-          <b className="block font-heading text-3xl font-semibold mt-1">18</b>
-          <span className="text-[10px] opacity-60 font-mono">POSTGIS RPC ONLINE</span>
-        </BlueprintPlate>
-
-        <BlueprintPlate className="p-3 bg-[color-mix(in_srgb,var(--color-surface)_40%,transparent)]">
-          <span className="kicker text-[var(--color-accent)]">Nivel de Amenaza Global</span>
-          <b className="block font-heading text-3xl font-semibold mt-1 text-[var(--color-accent)]">ELEVADO</b>
-          <span className="text-[10px] opacity-60 font-mono">CONDICIÓN DEF-CON 3</span>
-        </BlueprintPlate>
-      </div>
-
-      {/* Panel Central: Mapa D3 + Detalle de País */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-[340px]">
-        {/* Mapa D3 Natural Earth */}
+      {/* Cuerpo Principal */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 flex-1 min-h-0">
+        {/* Visualización Cartográfica Mundial D3 */}
         <BlueprintPlate
-          kicker="Visor Estratégico D3 Natural Earth"
-          title="Despliegue Territorial Global"
-          className="lg:col-span-2 flex flex-col p-3 bg-[color-mix(in_srgb,var(--color-surface)_25%,transparent)] min-h-[300px] relative overflow-hidden"
+          variant="panel"
+          kicker="Cartografía Operativa"
+          title="Proyección Global de Zonas (Natural Earth)"
+          className="flex flex-col min-h-[380px] relative overflow-hidden"
         >
-          <div
-            ref={mapContainerRef}
-            className="flex-1 w-full h-full min-h-[260px] relative border border-[var(--color-divider)] rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--color-bg)_60%,transparent)]"
-          />
-          <div className="flex items-center justify-between mt-2 text-[10px] font-mono opacity-70">
+          {features.length === 0 && !isLoading && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center p-6 bg-black/40 backdrop-blur-[2px] text-center">
+              <Shield className="w-10 h-10 text-[var(--color-accent)] opacity-60 mb-2" />
+              <div className="text-sm font-heading font-bold uppercase tracking-wider">
+                SITUACIÓN GLOBAL NOMINAL
+              </div>
+              <p className="text-xs font-mono text-[var(--color-text-muted)] max-w-md mt-1 mb-4">
+                No hay zonas tácticas delimitadas todavía en esta organización. Utilice el botón [ + NUEVA ÁREA ] para registrar teatros de operaciones o perímetros de riesgo.
+              </p>
+              {onNavigateTerreno && (
+                <button
+                  type="button"
+                  onClick={onNavigateTerreno}
+                  className="px-4 py-2 border border-[var(--color-accent)] text-[var(--color-accent)] text-xs font-heading font-bold uppercase tracking-wider hover:bg-[var(--color-accent)]/15 transition-colors flex items-center gap-1.5"
+                >
+                  <MapPin className="w-4 h-4" />
+                  Ir a Terreno para Delimitar
+                </button>
+              )}
+            </div>
+          )}
+
+          <div ref={mapContainerRef} className="flex-1 w-full h-full min-h-[320px]" />
+
+          {/* Leyenda Táctica del Mapa Mundial */}
+          <div className="flex items-center justify-between border-t border-[var(--color-divider)] pt-2 mt-2 text-[10px] font-mono text-[var(--color-text-muted)]">
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[var(--risk-crit)]" /> Crítico
+                <span className="w-2.5 h-2.5 bg-[#5980a6]/30 border border-[#5980a6]" />
+                Zona de Control (Responsabilidad RSO)
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[var(--risk-high)]" /> Alto
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[var(--risk-watch)]" /> Atención
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[var(--risk-stable)]" /> Nominal
+                <span className="w-2.5 h-2.5 bg-[var(--risk-crit)]/40 border border-[var(--risk-crit)]" />
+                Área de Peligro (Amenaza Táctica)
               </span>
             </div>
-            <span>D3.js + TopoJSON 110m</span>
+            <span>* Haga clic en un área para inspeccionar sus directivas</span>
           </div>
         </BlueprintPlate>
 
-        {/* Ficha de País / Lista de Teatros */}
+        {/* Panel Lateral de Detalle Táctico de la Zona Seleccionada */}
         <BlueprintPlate
-          kicker={selectedCountry ? `Ficha de Teatro · ${selectedCountry.name}` : 'Teatros de Operaciones'}
-          title={selectedCountry ? selectedCountry.city : 'Seleccione un País'}
-          className="flex flex-col p-3 bg-[color-mix(in_srgb,var(--color-surface)_25%,transparent)] overflow-hidden"
+          variant="panel"
+          kicker="Ficha Operativa"
+          title={selectedProps ? (isSelectedControl ? 'Teatro de Control' : 'Área de Peligro') : 'Selección de Área'}
+          className="flex flex-col min-h-[380px]"
         >
-          {selectedCountry ? (
-            <div className="flex flex-col h-full justify-between gap-3 text-xs">
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between border-b border-[var(--color-divider)] pb-2">
-                  <span className="font-heading font-bold text-sm uppercase">
-                    {selectedCountry.name}
-                  </span>
-                  <span
-                    className="tag text-[9px]"
-                    style={{
-                      borderColor: TIER_COLORS[selectedCountry.tier],
-                      color: TIER_COLORS[selectedCountry.tier],
-                    }}
-                  >
-                    {TIER_LABELS[selectedCountry.tier]}
-                  </span>
-                </div>
-
+          {selectedProps ? (
+            <div className="flex flex-col h-full justify-between space-y-4">
+              <div className="space-y-3">
+                {/* Cabecera de la ficha */}
                 <div>
-                  <span className="kicker block mb-1">Directiva / Nota RSO</span>
-                  <p className="text-[11px] leading-relaxed opacity-85">
-                    {selectedCountry.note}
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={`text-[9px] font-mono font-bold uppercase px-2 py-0.5 border ${
+                        isSelectedControl
+                          ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent)]/10'
+                          : 'border-amber-500 text-amber-400 bg-amber-500/10'
+                      }`}
+                    >
+                      {isSelectedControl ? '🛡️ ZONA DE CONTROL' : `⚠️ AMENAZA [${selectedProps.severity}]`}
+                    </span>
+                    <span className="text-[10px] font-mono opacity-50">
+                      ID: {String(selectedZone?.id || selectedProps.id).slice(0, 8)}...
+                    </span>
+                  </div>
+
+                  <h3 className="text-base font-heading font-bold uppercase tracking-wider mt-2 text-[var(--color-text)]">
+                    {selectedProps.name}
+                  </h3>
+
+                  {selectedProps.description && (
+                    <p className="text-xs text-[var(--color-text-muted)] mt-1 leading-relaxed">
+                      {selectedProps.description}
+                    </p>
+                  )}
                 </div>
 
-                <div className="p-2 rounded-[var(--radius-sm)] bg-[var(--color-bg)] border border-[var(--color-divider)]">
-                  <span className="kicker block text-[9px] mb-0.5 text-[var(--risk-stable)]">
-                    Refugio Seguro Designado
-                  </span>
-                  <span className="font-semibold text-xs">{selectedCountry.haven}</span>
-                </div>
+                {/* Parámetros Operativos Reales */}
+                <div className="border-t border-[var(--color-divider)] pt-3 space-y-2 text-xs font-mono">
+                  <div className="flex items-center justify-between">
+                    <span className="opacity-70">Severidad:</span>
+                    <span className="font-bold text-[var(--color-accent)]">
+                      {selectedProps.severity}
+                    </span>
+                  </div>
 
-                <div className="flex items-center justify-between text-[11px] font-mono border-t border-[var(--color-divider)] pt-2">
-                  <span className="opacity-60">Personal activo:</span>
-                  <span className="font-bold">{selectedCountry.peopleCount} expatriados</span>
+                  {selectedProps.assigned_rso_id && (
+                    <div className="flex items-center justify-between">
+                      <span className="opacity-70">RSO Responsable:</span>
+                      <span className="font-bold text-[var(--color-text)]">
+                        Asignado (ID: {String(selectedProps.assigned_rso_id).slice(0, 8)}...)
+                      </span>
+                    </div>
+                  )}
+
+                  {selectedProps.buffer_meters > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="opacity-70">Buffer Perimetral:</span>
+                      <span>{selectedProps.buffer_meters} m</span>
+                    </div>
+                  )}
+
+                  {selectedProps.is_curfew && (
+                    <div className="p-2 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px]">
+                      <span className="font-bold block">⚠️ RESTRICCIÓN TOQUE DE QUEDA</span>
+                      <span>Horario activo: {selectedProps.curfew_start || '22:00'} - {selectedProps.curfew_end || '06:00'} UTC</span>
+                    </div>
+                  )}
+
+                  {selectedProps.radio_frequency && (
+                    <div className="flex items-center justify-between">
+                      <span className="opacity-70">Radio Táctica:</span>
+                      <span>{selectedProps.radio_frequency}</span>
+                    </div>
+                  )}
+
+                  {selectedProps.contact_phone && (
+                    <div className="flex items-center justify-between">
+                      <span className="opacity-70">Contacto Emergencia:</span>
+                      <span>{selectedProps.contact_phone}</span>
+                    </div>
+                  )}
+
+                  {selectedProps.gate_access_protocol && (
+                    <div className="pt-2 border-t border-[var(--color-divider)] text-[11px]">
+                      <span className="opacity-70 block mb-0.5">Protocolo de Acceso:</span>
+                      <span className="text-[var(--color-text)]">{selectedProps.gate_access_protocol}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-[var(--color-divider)] flex items-center gap-2">
+              {/* Botón para saltar a Terreno */}
+              <div className="pt-3 border-t border-[var(--color-divider)]">
                 {onNavigateTerreno && (
                   <button
                     type="button"
                     onClick={onNavigateTerreno}
-                    className="btn btn-secondary text-xs flex-1 flex items-center justify-center gap-1 py-1.5"
+                    className="w-full py-2 bg-[var(--color-surface)] border border-[var(--color-divider)] hover:border-[var(--color-accent)] text-xs font-heading font-semibold uppercase tracking-wider text-[var(--color-text)] hover:text-[var(--color-accent)] transition-colors flex items-center justify-center gap-2"
                   >
-                    <ExternalLink className="w-3 h-3" />
-                    <span>Abrir Terreno</span>
+                    <MapPin className="w-3.5 h-3.5" />
+                    Inspeccionar en Terreno
+                    <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setSelectedCountryId(null)}
-                  className="btn btn-secondary text-xs px-2.5 py-1.5"
-                >
-                  Ver Todos
-                </button>
               </div>
             </div>
           ) : (
-            <div className="divide-y divide-[var(--color-divider)] overflow-y-auto max-h-[300px]">
-              {COUNTRIES_SPEC.map((c) => (
-                <div
-                  key={c.id}
-                  onClick={() => setSelectedCountryId(c.id)}
-                  className="p-2 hover:bg-[color-mix(in_srgb,var(--color-text)_4%,transparent)] transition-colors flex items-center justify-between cursor-pointer"
-                >
-                  <div>
-                    <div className="font-heading font-semibold text-xs">{c.name}</div>
-                    <div className="text-[10px] opacity-60">{c.city}</div>
-                  </div>
-                  <div className="text-right flex flex-col items-end gap-1">
-                    <span
-                      className="tag text-[8px]"
-                      style={{ borderColor: TIER_COLORS[c.tier], color: TIER_COLORS[c.tier] }}
-                    >
-                      {TIER_LABELS[c.tier]}
-                    </span>
-                    <span className="font-mono text-[9px] opacity-60">
-                      {c.peopleCount} pers.
-                    </span>
-                  </div>
-                </div>
-              ))}
+            <div className="flex flex-col items-center justify-center h-full text-center p-6 opacity-60 font-mono text-xs">
+              <Layers className="w-8 h-8 mb-2 opacity-50" />
+              <span>Seleccione un área en el mapa mundial para consultar su ficha táctica.</span>
             </div>
           )}
         </BlueprintPlate>
-      </div>
-
-      {/* Panel Inferior: Cinta de Incidentes (Feed Táctico Sala) */}
-      <div className="h-44 flex-none">
-        <IncidentTape incidents={incidents} onSelectIncident={onSelectIncident} />
       </div>
     </div>
   );

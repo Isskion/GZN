@@ -8,7 +8,7 @@ import { validateGeoJSONPolygon, validateZoneEnhancements } from '@/lib/geo/vali
 import { logAuditEvent } from '@/lib/audit/logger';
 import { ZoneSeverity } from '@/types/database';
 
-const ALLOWED_SEVERITIES: ZoneSeverity[] = ['RED', 'AMBER', 'SAFE_HAVEN', 'CORRIDOR'];
+const ALLOWED_SEVERITIES: ZoneSeverity[] = ['RED', 'AMBER', 'SAFE_HAVEN', 'CORRIDOR', 'OPERATIONAL'];
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface RouteParams {
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const { data: zone, error } = await supabase
       .from('zones')
       .select(`
-        id, organization_id, created_by, name, description, severity, color_hex,
+        id, organization_id, created_by, assigned_rso_id, zone_type, name, description, severity, color_hex,
         buffer_meters, is_curfew, curfew_start, curfew_end, contact_phone, radio_frequency,
         gate_access_protocol, valid_from, valid_until, is_active, created_at, updated_at, geom
       `)
@@ -71,6 +71,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         id: zone.id,
         organization_id: zone.organization_id,
         created_by: zone.created_by,
+        assigned_rso_id: zone.assigned_rso_id ?? null,
+        zone_type: zone.zone_type ?? 'THREAT',
         name: zone.name,
         description: zone.description,
         severity: zone.severity,
@@ -146,8 +148,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const { data: currentZone, error: fetchError } = await supabase
       .from('zones')
       .select(`
-        id, organization_id, name, description, severity, color_hex,
-        buffer_meters, is_curfew, curfew_start, curfew_end, contact_phone,
+        id, organization_id, name, description, zone_type, severity, color_hex,
+        assigned_rso_id, buffer_meters, is_curfew, curfew_start, curfew_end, contact_phone,
         radio_frequency, gate_access_protocol, is_active, valid_until
       `)
       .eq('id', id)
@@ -164,7 +166,43 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       updated_at: new Date().toISOString(),
     };
 
-    // 2. Validación de campos básicos
+    // 2. Validación de tipología y RSO
+    if (body.zone_type !== undefined) {
+      if (!['RESPONSIBILITY', 'THREAT'].includes(body.zone_type)) {
+        return NextResponse.json(
+          { error: `Tipo de zona inválido: '${body.zone_type}'. Debe ser RESPONSIBILITY o THREAT.` },
+          { status: 400 }
+        );
+      }
+      updates.zone_type = body.zone_type;
+    }
+
+    if (body.assigned_rso_id !== undefined) {
+      if (body.assigned_rso_id !== null) {
+        if (!UUID_REGEX.test(body.assigned_rso_id)) {
+          return NextResponse.json(
+            { error: 'El campo assigned_rso_id debe ser un UUID válido o null.' },
+            { status: 400 }
+          );
+        }
+        // Validar que el RSO pertenezca a la organización y tenga nivel >= 60
+        const { data: rsoProfile } = await supabase
+          .from('profiles')
+          .select('id, role_level, is_active, organization_id')
+          .eq('id', body.assigned_rso_id)
+          .single();
+
+        if (!rsoProfile || !rsoProfile.is_active || (rsoProfile.role_level ?? 0) < 60 || rsoProfile.organization_id !== currentZone.organization_id) {
+          return NextResponse.json(
+            { error: 'El RSO asignado no existe, está inactivo, pertenece a otra organización o no tiene nivel suficiente (>= 60).' },
+            { status: 400 }
+          );
+        }
+      }
+      updates.assigned_rso_id = body.assigned_rso_id;
+    }
+
+    // 3. Validación de campos básicos
     if (body.name !== undefined) {
       if (typeof body.name !== 'string' || body.name.trim() === '') {
         return NextResponse.json({ error: 'El campo "name" no puede estar vacío.' }, { status: 400 });
@@ -186,14 +224,43 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       updates.severity = body.severity;
     }
 
-    if (body.color_hex !== undefined) {
-      if (typeof body.color_hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(body.color_hex)) {
+    // Validación estricta de consistencia de modelo antes de ir a PostgreSQL (Precisión 3 Claude)
+    const targetZoneType = updates.zone_type ?? currentZone.zone_type ?? 'THREAT';
+    const targetSeverity = updates.severity ?? currentZone.severity;
+    const targetRsoId = updates.assigned_rso_id !== undefined ? updates.assigned_rso_id : currentZone.assigned_rso_id;
+
+    if (targetZoneType === 'RESPONSIBILITY') {
+      if (targetSeverity !== 'OPERATIONAL') {
         return NextResponse.json(
-          { error: 'Formato color_hex inválido. Debe ser hexadecimal de 6 caracteres (ej. #EF4444).' },
+          { error: `Inconsistencia: Una zona de responsabilidad operativa (RESPONSIBILITY) debe tener severidad 'OPERATIONAL' (recibido: '${targetSeverity}').` },
           { status: 400 }
         );
       }
-      updates.color_hex = body.color_hex;
+      if (!targetRsoId) {
+        return NextResponse.json(
+          { error: 'Inconsistencia: Para zonas de responsabilidad operativa (RESPONSIBILITY) es estrictamente obligatorio asignar un RSO.' },
+          { status: 400 }
+        );
+      }
+      // Corrección 1 Claude: En RESPONSIBILITY el color siempre es el neutro Industry Steel (#5980a6)
+      updates.color_hex = '#5980a6';
+    } else {
+      // THREAT
+      if (targetSeverity === 'OPERATIONAL') {
+        return NextResponse.json(
+          { error: 'Inconsistencia: Las zonas de peligro (THREAT) no pueden tener severidad OPERATIONAL. Debe ser RED, AMBER, SAFE_HAVEN o CORRIDOR.' },
+          { status: 400 }
+        );
+      }
+      if (body.color_hex !== undefined) {
+        if (typeof body.color_hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(body.color_hex)) {
+          return NextResponse.json(
+            { error: 'Formato color_hex inválido. Debe ser hexadecimal de 6 caracteres (ej. #EF4444).' },
+            { status: 400 }
+          );
+        }
+        updates.color_hex = body.color_hex;
+      }
     }
 
     if (body.is_active !== undefined) {

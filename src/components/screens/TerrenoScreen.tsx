@@ -24,7 +24,8 @@ import { BlueprintPlate } from '@/components/industry/BlueprintPlate';
 export interface ZoneItem {
   id: string;
   name: string;
-  severity: 'RED' | 'AMBER' | 'SAFE_HAVEN' | 'CORRIDOR';
+  zone_type: 'RESPONSIBILITY' | 'THREAT';
+  severity: 'RED' | 'AMBER' | 'SAFE_HAVEN' | 'CORRIDOR' | 'OPERATIONAL';
   color: string;
   description?: string;
   center?: [number, number];
@@ -35,6 +36,7 @@ export interface ZoneItem {
   contact_phone?: string | null;
   radio_frequency?: string | null;
   gate_access_protocol?: string | null;
+  assigned_rso_id?: string | null;
 }
 
 interface TravelerItem {
@@ -52,6 +54,7 @@ interface TerrenoScreenProps {
   onAlertTriggered?: (count: number) => void;
   canManageZones?: boolean;
   onOpenCreateZone?: () => void;
+  onEditZone?: (zone: any) => void;
   refreshTrigger?: number;
 }
 
@@ -59,6 +62,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
   onAlertTriggered,
   canManageZones = false,
   onOpenCreateZone,
+  onEditZone,
   refreshTrigger = 0,
 }) => {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -151,9 +155,12 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
             center = [Number((sumLng / count).toFixed(6)), Number((sumLat / count).toFixed(6))];
           }
 
-          const sev = (f.properties?.severity || 'RED') as ZoneItem['severity'];
+          const zType = (f.properties?.zone_type || 'THREAT') as 'RESPONSIBILITY' | 'THREAT';
+          const sev = (f.properties?.severity || (zType === 'RESPONSIBILITY' ? 'OPERATIONAL' : 'RED')) as ZoneItem['severity'];
           const defaultColor =
-            sev === 'RED'
+            zType === 'RESPONSIBILITY'
+              ? 'var(--color-accent)'
+              : sev === 'RED'
               ? 'var(--risk-crit)'
               : sev === 'AMBER'
               ? 'var(--risk-high)'
@@ -164,6 +171,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
           return {
             id: String(f.properties?.id || f.id),
             name: f.properties?.name || 'Zona táctica',
+            zone_type: zType,
             severity: sev,
             color: f.properties?.color || defaultColor,
             description: f.properties?.description,
@@ -175,6 +183,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
             contact_phone: f.properties?.contact_phone,
             radio_frequency: f.properties?.radio_frequency,
             gate_access_protocol: f.properties?.gate_access_protocol,
+            assigned_rso_id: f.properties?.assigned_rso_id,
           };
         });
 
@@ -338,14 +347,30 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
         paint: {
           'fill-color': [
             'match',
-            ['get', 'severity'],
-            'RED', '#e07a6a',
-            'AMBER', '#d8a84f',
-            'SAFE_HAVEN', '#63b598',
-            'CORRIDOR', '#94bce3',
-            '#98989b',
+            ['get', 'zone_type'],
+            'RESPONSIBILITY',
+            '#5980a6',
+            [
+              'match',
+              ['get', 'severity'],
+              'RED',
+              '#e07a6a',
+              'AMBER',
+              '#d8a84f',
+              'SAFE_HAVEN',
+              '#63b598',
+              'CORRIDOR',
+              '#94bce3',
+              '#5980a6',
+            ],
           ],
-          'fill-opacity': 0.28,
+          'fill-opacity': [
+            'match',
+            ['get', 'zone_type'],
+            'RESPONSIBILITY',
+            0.08,
+            0.28,
+          ],
         },
       });
 
@@ -356,14 +381,30 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
         paint: {
           'line-color': [
             'match',
-            ['get', 'severity'],
-            'RED', '#e07a6a',
-            'AMBER', '#d8a84f',
-            'SAFE_HAVEN', '#63b598',
-            'CORRIDOR', '#94bce3',
-            '#98989b',
+            ['get', 'zone_type'],
+            'RESPONSIBILITY',
+            '#5980a6',
+            [
+              'match',
+              ['get', 'severity'],
+              'RED',
+              '#e07a6a',
+              'AMBER',
+              '#d8a84f',
+              'SAFE_HAVEN',
+              '#63b598',
+              'CORRIDOR',
+              '#94bce3',
+              '#5980a6',
+            ],
           ],
-          'line-width': 2,
+          'line-width': [
+            'match',
+            ['get', 'zone_type'],
+            'RESPONSIBILITY',
+            1.5,
+            2,
+          ],
         },
       });
 
@@ -372,13 +413,14 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
         if (!e.features || e.features.length === 0) return;
         const f = e.features[0];
         const p = f.properties || {};
+        const isResp = p.zone_type === 'RESPONSIBILITY';
 
         new maplibregl.Popup({ closeButton: true, maxWidth: '280px' })
           .setLngLat(e.lngLat)
           .setHTML(`
             <div style="font-family: var(--font-heading, sans-serif); padding: 4px; color: #1d1f20;">
-              <div style="font-size: 9px; font-family: monospace; opacity: 0.6; text-transform: uppercase;">
-                ÁREA TÁCTICA [${p.severity || 'ZONA'}]
+              <div style="font-size: 9px; font-family: monospace; color: ${isResp ? '#2f4a63' : '#a5762d'}; font-weight: 700; text-transform: uppercase;">
+                ${isResp ? '🛡️ ZONA DE CONTROL OPERATIVO' : `⚠️ ÁREA DE PELIGRO [${p.severity || 'ZONA'}]`}
               </div>
               <div style="font-weight: 700; font-size: 13px; text-transform: uppercase; margin-top: 2px;">
                 ${p.name || 'Sin nombre'}
@@ -647,34 +689,72 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
             </div>
           ) : (
             <div className="divide-y divide-[color-mix(in_srgb,var(--color-text)_8%,transparent)] max-h-56 overflow-y-auto">
-              {zones.map((z) => (
-                <div
-                  key={z.id}
-                  onClick={() => handleSelectZone(z)}
-                  className="py-2 px-1 cursor-pointer hover:bg-[color-mix(in_srgb,var(--color-text)_5%,transparent)] transition-colors"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium truncate max-w-[175px]">{z.name}</span>
-                    <span
-                      className="tag text-[9px]"
-                      style={{
-                        borderColor: z.color,
-                        color: z.color,
-                      }}
-                    >
-                      {z.severity}
-                    </span>
+              {zones.map((z) => {
+                const isResp = z.zone_type === 'RESPONSIBILITY';
+                return (
+                  <div
+                    key={z.id}
+                    onClick={() => handleSelectZone(z)}
+                    className="py-2 px-1 cursor-pointer hover:bg-[color-mix(in_srgb,var(--color-text)_5%,transparent)] transition-colors group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {isResp ? (
+                          <Shield className="w-3 h-3 text-[var(--color-accent)] shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-3 h-3 shrink-0" style={{ color: z.color }} />
+                        )}
+                        <span className="text-xs font-medium truncate max-w-[155px]">{z.name}</span>
+                      </div>
+                      <span
+                        className="tag text-[9px]"
+                        style={{
+                          borderColor: isResp ? 'var(--color-accent)' : z.color,
+                          color: isResp ? 'var(--color-accent)' : z.color,
+                        }}
+                      >
+                        {isResp ? 'CONTROL' : z.severity}
+                      </span>
+                    </div>
+                    {z.description && (
+                      <p className="text-[11px] opacity-65 m-0 mt-0.5 leading-snug line-clamp-2">{z.description}</p>
+                    )}
+                    <div className="flex items-center justify-between text-[9px] font-mono opacity-50 mt-1">
+                      <span>{isResp ? 'TEATRO OPERATIVO' : (z.is_curfew ? '⚠️ TOQUE DE QUEDA' : 'PERÍMETRO TÁCTICO')}</span>
+                      {canManageZones && onEditZone && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditZone({
+                              id: z.id,
+                              geometry: { type: 'Polygon', coordinates: [] },
+                              properties: {
+                                id: z.id,
+                                name: z.name,
+                                description: z.description,
+                                zone_type: z.zone_type,
+                                severity: z.severity,
+                                assigned_rso_id: z.assigned_rso_id,
+                                buffer_meters: z.buffer_meters,
+                                is_curfew: z.is_curfew,
+                                curfew_start: z.curfew_start,
+                                curfew_end: z.curfew_end,
+                                contact_phone: z.contact_phone,
+                                radio_frequency: z.radio_frequency,
+                                gate_access_protocol: z.gate_access_protocol,
+                              },
+                            });
+                          }}
+                          className="opacity-0 group-hover:opacity-100 text-[var(--color-accent)] hover:underline uppercase text-[9px] font-heading font-semibold"
+                        >
+                          Editar
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  {z.description && (
-                    <p className="text-[11px] opacity-65 m-0 mt-0.5 leading-snug line-clamp-2">{z.description}</p>
-                  )}
-                  {z.is_curfew && (
-                    <span className="text-[9px] font-mono text-[var(--risk-high)] block mt-0.5">
-                      Restricción: {z.curfew_start || ''} - {z.curfew_end || ''} UTC
-                    </span>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

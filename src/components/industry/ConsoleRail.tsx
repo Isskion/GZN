@@ -1,10 +1,10 @@
 'use client';
 
 import React from 'react';
-import { Globe, MapPin, Users, Radio, FileText } from 'lucide-react';
+import { Globe, MapPin, Users, Radio, FileText, Layers } from 'lucide-react';
 import { UserRole, hasScreenAccess } from '@/types/database';
 
-export type ScreenId = 'situacion' | 'terreno' | 'personas' | 'mensajes' | 'briefings';
+export type ScreenId = 'terreno' | 'zonas' | 'situacion' | 'personas' | 'briefings' | 'mensajes';
 
 interface ConsoleRailProps {
   activeScreen: ScreenId;
@@ -15,6 +15,7 @@ interface ConsoleRailProps {
 
 const NAV_ITEMS: { id: ScreenId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'terreno', label: 'Terreno', icon: MapPin },
+  { id: 'zonas', label: 'Zonas', icon: Layers },
   { id: 'situacion', label: 'Situación', icon: Globe },
   { id: 'personas', label: 'Personas', icon: Users },
   { id: 'briefings', label: 'Briefings', icon: FileText },
