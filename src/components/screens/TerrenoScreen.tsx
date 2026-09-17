@@ -757,25 +757,30 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onEditZone({
-                              id: z.id,
-                              geometry: { type: 'Polygon', coordinates: [] },
-                              properties: {
+                            const realFeature = zonesGeoJson?.features?.find(
+                              (f: any) => String(f.id || f.properties?.id) === z.id
+                            );
+                            onEditZone(
+                              realFeature ?? {
                                 id: z.id,
-                                name: z.name,
-                                description: z.description,
-                                zone_type: z.zone_type,
-                                severity: z.severity,
-                                assigned_rso_id: z.assigned_rso_id,
-                                buffer_meters: z.buffer_meters,
-                                is_curfew: z.is_curfew,
-                                curfew_start: z.curfew_start,
-                                curfew_end: z.curfew_end,
-                                contact_phone: z.contact_phone,
-                                radio_frequency: z.radio_frequency,
-                                gate_access_protocol: z.gate_access_protocol,
-                              },
-                            });
+                                geometry: null,
+                                properties: {
+                                  id: z.id,
+                                  name: z.name,
+                                  description: z.description,
+                                  zone_type: z.zone_type,
+                                  severity: z.severity,
+                                  assigned_rso_id: z.assigned_rso_id,
+                                  buffer_meters: z.buffer_meters,
+                                  is_curfew: z.is_curfew,
+                                  curfew_start: z.curfew_start,
+                                  curfew_end: z.curfew_end,
+                                  contact_phone: z.contact_phone,
+                                  radio_frequency: z.radio_frequency,
+                                  gate_access_protocol: z.gate_access_protocol,
+                                },
+                              }
+                            );
                           }}
                           className="opacity-0 group-hover:opacity-100 text-[var(--color-accent)] hover:underline uppercase text-[9px] font-heading font-semibold"
                         >

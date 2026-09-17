@@ -126,6 +126,9 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
     '-3.7100, 40.4200\n-3.6900, 40.4200\n-3.6900, 40.4100\n-3.7100, 40.4100'
   );
 
+  // Estado para redibujar perímetro en modo edición (Mandato Daniel / Claude)
+  const [isRedrawingGeometry, setIsRedrawingGeometry] = useState<boolean>(false);
+
   // Estado de procesamiento y error
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -146,20 +149,21 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
     }
   }, [isOpen]);
 
-  // Cargar dataset TopoJSON de países (solo si no es modo edición)
+  // Cargar dataset TopoJSON de países cuando el modal está abierto
   useEffect(() => {
-    if (!worldTopology && isOpen && !isEditMode) {
+    if (!worldTopology && isOpen) {
       fetch('/data/countries-110m.json')
         .then((res) => res.json())
         .then((data) => setWorldTopology(data))
         .catch((err) => console.error('Error cargando países TopoJSON:', err));
     }
-  }, [worldTopology, isOpen, isEditMode]);
+  }, [worldTopology, isOpen]);
 
   // Sincronizar estado inicial al abrir o cambiar de zona
   useEffect(() => {
     if (isOpen) {
       setSubmitError(null);
+      setIsRedrawingGeometry(false);
       if (initialZone) {
         const p = initialZone.properties || {};
         setName(p.name || '');
@@ -176,6 +180,13 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
         setRadioFrequency(p.radio_frequency || '');
         setGateAccessProtocol(p.gate_access_protocol || '');
         setValidUntil(p.valid_until ? p.valid_until.slice(0, 16) : '');
+
+        // Si la zona tiene un polígono, sugerir su primer vértice como centro para el modo radio
+        if (initialZone.geometry?.coordinates?.[0]?.[0]) {
+          const pt = initialZone.geometry.coordinates[0][0];
+          setCenterLng(Number(pt[0].toFixed(4)));
+          setCenterLat(Number(pt[1].toFixed(4)));
+        }
       } else {
         setName('');
         setDescription('');
@@ -241,7 +252,7 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
 
   // Geometría activa calculada según modalidad
   const activeGeometry = useMemo<GeoJSON.Polygon | null>(() => {
-    if (isEditMode && initialZone?.geometry) {
+    if (isEditMode && !isRedrawingGeometry && initialZone?.geometry) {
       return initialZone.geometry;
     }
 
@@ -273,7 +284,7 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
     }
 
     return null;
-  }, [isEditMode, initialZone, mode, countryExtraction, centerLng, centerLat, radiusKm, rawCoordinatesText]);
+  }, [isEditMode, isRedrawingGeometry, initialZone, mode, countryExtraction, centerLng, centerLat, radiusKm, rawCoordinatesText]);
 
   // Superficie aproximada calculada
   const approximateAreaKm2 = useMemo(() => {
@@ -299,7 +310,20 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
       return;
     }
 
-    if (!isEditMode) {
+    // Validación de geometría: exigida en creación y cuando se activa redibujado en edición
+    if (isEditMode) {
+      if (isRedrawingGeometry) {
+        if (!activeGeometry) {
+          setSubmitError('No se ha podido generar una geometría GeoJSON válida para el nuevo perímetro.');
+          return;
+        }
+        const validation = validateGeoJSONPolygon(activeGeometry);
+        if (!validation.valid) {
+          setSubmitError(`Geometría inválida: ${validation.error}`);
+          return;
+        }
+      }
+    } else {
       if (!activeGeometry) {
         setSubmitError('No se ha podido generar una geometría GeoJSON válida para la zona.');
         return;
@@ -317,24 +341,31 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
     try {
       if (isEditMode) {
         // Modo Edición: PATCH /api/zones/[id]
+        const updatePayload: Record<string, any> = {
+          name: name.trim(),
+          description: description.trim() || null,
+          zone_type: zoneType,
+          severity: zoneType === 'RESPONSIBILITY' ? 'OPERATIONAL' : severity,
+          assigned_rso_id: assignedRsoId || null,
+          buffer_meters: bufferMeters,
+          is_curfew: isCurfew,
+          curfew_start: isCurfew ? curfewStart : null,
+          curfew_end: isCurfew ? curfewEnd : null,
+          contact_phone: contactPhone.trim() || null,
+          radio_frequency: radioFrequency.trim() || null,
+          gate_access_protocol: gateAccessProtocol.trim() || null,
+          valid_until: validUntil ? new Date(validUntil).toISOString() : null,
+        };
+
+        // Solo incluir geojson_geometry si el usuario activó explícitamente el redibujado
+        if (isRedrawingGeometry && activeGeometry) {
+          updatePayload.geojson_geometry = activeGeometry;
+        }
+
         const response = await fetch(`/api/zones/${initialZone.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: name.trim(),
-            description: description.trim() || null,
-            zone_type: zoneType,
-            severity: zoneType === 'RESPONSIBILITY' ? 'OPERATIONAL' : severity,
-            assigned_rso_id: assignedRsoId || null,
-            buffer_meters: bufferMeters,
-            is_curfew: isCurfew,
-            curfew_start: isCurfew ? curfewStart : null,
-            curfew_end: isCurfew ? curfewEnd : null,
-            contact_phone: contactPhone.trim() || null,
-            radio_frequency: radioFrequency.trim() || null,
-            gate_access_protocol: gateAccessProtocol.trim() || null,
-            valid_until: validUntil ? new Date(validUntil).toISOString() : null,
-          }),
+          body: JSON.stringify(updatePayload),
         });
 
         const result = await response.json();
@@ -598,20 +629,67 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
             </div>
           )}
 
-          {/* MODO EDICIÓN: NOTA DE GEOMETRÍA */}
-          {isEditMode ? (
-            <div className="p-3 border border-[var(--color-divider)] bg-[var(--color-surface)] text-xs font-mono opacity-80 flex items-center gap-2">
-              <Shield className="w-4 h-4 text-[var(--color-accent)] shrink-0" />
-              <span>
-                Geometría fija registrada ({initialZone?.geometry?.type || 'POLYGON'}). Para redibujar el polígono, elimine esta zona y créela de nuevo.
-              </span>
+          {/* EN MODO EDICIÓN: CONTROL PARA CONSERVAR O REDIBUJAR PERÍMETRO */}
+          {isEditMode && (
+            <div className="space-y-2">
+              {!isRedrawingGeometry ? (
+                <div className="p-3.5 border border-[var(--color-divider)] bg-[var(--color-surface)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 text-xs font-mono">
+                    <Shield className="w-4 h-4 text-[var(--color-accent)] shrink-0" />
+                    <div>
+                      <span className="font-bold text-[var(--color-text)] block">
+                        Perímetro Territorial Registrado
+                      </span>
+                      <span className="opacity-70 text-[11px] block">
+                        Geometría conservada ({initialZone?.geometry?.type || 'POLYGON'}) · {approximateAreaKm2 > 0 ? `${approximateAreaKm2.toLocaleString('es-ES', { maximumFractionDigits: 1 })} km²` : 'Superficie registrada'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsRedrawingGeometry(true);
+                      if (initialZone?.geometry?.coordinates?.[0]?.[0]) {
+                        const pt = initialZone.geometry.coordinates[0][0];
+                        setCenterLng(Number(pt[0].toFixed(4)));
+                        setCenterLat(Number(pt[1].toFixed(4)));
+                      }
+                    }}
+                    className="px-3.5 py-1.5 border border-[var(--color-accent)] text-[var(--color-accent)] text-xs font-heading font-semibold uppercase tracking-wider hover:bg-[var(--color-accent)]/15 transition-colors flex items-center gap-1.5 shrink-0"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    Redibujar Perímetro
+                  </button>
+                </div>
+              ) : (
+                <div className="p-3.5 border border-amber-500/40 bg-amber-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 text-xs font-mono text-amber-300">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+                    <div>
+                      <span className="font-bold block">Redibujado de Perímetro Activo</span>
+                      <span className="opacity-80 text-[11px] block">
+                        Se sustituirá el perímetro completo de la zona al guardar los cambios.
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsRedrawingGeometry(false)}
+                    className="px-3 py-1.5 border border-[var(--color-divider)] text-[var(--color-text-muted)] text-xs font-heading font-semibold uppercase tracking-wider hover:border-[var(--color-text)] hover:text-[var(--color-text)] transition-colors shrink-0"
+                  >
+                    Cancelar y Conservar Perímetro Actual
+                  </button>
+                </div>
+              )}
             </div>
-          ) : (
+          )}
+
+          {/* SELECTOR DE MODALIDAD GEOMÉTRICA (3 pestañas): Visible en Creación o cuando se activa Redibujado en Edición */}
+          {(!isEditMode || isRedrawingGeometry) && (
             <>
-              {/* SELECTOR DE MODALIDAD GEOMÉTRICA (3 pestañas) */}
               <div>
                 <label className="text-[11px] font-heading font-semibold uppercase tracking-wider text-[var(--color-text)] opacity-70 block mb-2">
-                  3. Modalidad de Delimitación Geométrica
+                  {isEditMode ? '3. Nuevo Perímetro Territorial' : '3. Modalidad de Delimitación Geométrica'}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   <button
@@ -992,7 +1070,7 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || (!isEditMode && !activeGeometry) || !name.trim()}
+              disabled={isSubmitting || (!isEditMode && !activeGeometry) || (isEditMode && isRedrawingGeometry && !activeGeometry) || !name.trim()}
               className="px-5 py-2 bg-[var(--color-accent)] text-white text-xs font-heading font-bold uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm"
             >
               {isSubmitting ? (

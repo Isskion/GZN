@@ -1126,6 +1126,13 @@ async function runTests() {
   assert(terrenoContent.includes('focusZoneId?: string | null;'), 'TerrenoScreenProps incluye focusZoneId');
   assert(terrenoContent.includes('[focusZoneId, isMapLoaded, zones]'), 'TerrenoScreen.tsx tiene un useEffect dependiente de [focusZoneId, isMapLoaded, zones]');
 
+  // 16. Redibujado de Geometría en Modo Edición (Mandato Daniel / Claude)
+  assert(terrenoContent.includes('zonesGeoJson?.features?.find'), 'TerrenoScreen.tsx busca la feature real en zonesGeoJson al editar');
+  assert(!terrenoContent.includes("geometry: { type: 'Polygon', coordinates: [] }"), 'TerrenoScreen.tsx no envía coordenadas vacías hardcodeadas al editar');
+  assert(modalContent.includes('const [isRedrawingGeometry, setIsRedrawingGeometry] = useState'), 'ZoneCreationModal.tsx declara el estado isRedrawingGeometry');
+  assert(modalContent.includes('Redibujar Perímetro'), 'ZoneCreationModal.tsx incluye el botón Redibujar Perímetro');
+  assert(modalContent.includes('if (isRedrawingGeometry && activeGeometry)'), 'ZoneCreationModal.tsx incluye geojson_geometry en PATCH solo al redibujar');
+
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);
   console.log('================================================================\n');
