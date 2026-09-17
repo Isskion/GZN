@@ -1012,6 +1012,39 @@ async function runTests() {
   assert(closedDrawnPoly?.type === 'Polygon', 'Polígono trazado es de tipo Polygon');
   assert(closedDrawnPoly?.coordinates[0].length === 4, 'Polígono trazado de 3 puntos expandido a 4 coordenadas cerradas');
   assert(validateGeoJSONPolygon(closedDrawnPoly).valid === true, 'Polígono trazado pasa validación GeoJSON');
+
+  // --- 14. Smoke Tests Estáticos de Seguridad en Archivos SQL y Componentes (Mandato Claude) ---
+  console.log('\n--- 14. Smoke Tests Estáticos de Seguridad en Archivos SQL y Componentes (Mandato Claude) ---');
+
+  const sql010Path = path.resolve(process.cwd(), 'sql/010_update_zone_creation_rpc.sql');
+  const sql010Content = fs.readFileSync(sql010Path, 'utf8');
+
+  // 1. Verificar ausencia de 'SUPER_ADMIN' en la migración activa 010
+  assert(!sql010Content.includes("'SUPER_ADMIN'"), 'sql/010 no contiene referencias activas a SUPER_ADMIN');
+
+  // 2. Verificar ausencia de control obsoleto por get_auth_role() en sql/010
+  assert(!sql010Content.includes('public.get_auth_role()'), 'sql/010 no evalúa roles por nombre con get_auth_role()');
+
+  // 3. Verificar control numérico por role_level en sql/010
+  assert(sql010Content.includes('v_role_level < 60'), 'sql/010 verifica role_level < 60 para denegación de creación de zonas');
+
+  // 4. Verificar retirada de la función incompleta create_tactical_zone en sql/010
+  assert(sql010Content.includes('DROP FUNCTION IF EXISTS public.create_tactical_zone'), 'sql/010 retira la función muerta create_tactical_zone');
+
+  // 5. Verificar presencia de p_assigned_rso_id y su validación relacional en sql/010
+  assert(sql010Content.includes('p_assigned_rso_id UUID DEFAULT NULL'), 'sql/010 incluye el parámetro p_assigned_rso_id');
+  assert(sql010Content.includes('role_level >= 60'), 'sql/010 valida que el RSO asignado tenga role_level >= 60');
+
+  // 6. Verificar que ConsoleRail.tsx no tiene fail-open de ORG_ADMIN por defecto
+  const railPath = path.resolve(process.cwd(), 'src/components/industry/ConsoleRail.tsx');
+  const railContent = fs.readFileSync(railPath, 'utf8');
+  assert(!railContent.includes("currentRole = 'ORG_ADMIN'"), "ConsoleRail.tsx no tiene fallback permisivo a ORG_ADMIN");
+
+  // 7. Verificar que RsoConsoleShell.tsx importa y utiliza ROLE_LEVELS
+  const shellPath = path.resolve(process.cwd(), 'src/components/industry/RsoConsoleShell.tsx');
+  const shellContent = fs.readFileSync(shellPath, 'utf8');
+  assert(shellContent.includes('ROLE_LEVELS'), 'RsoConsoleShell.tsx importa y utiliza la constante única ROLE_LEVELS');
+
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);
   console.log('================================================================\n');

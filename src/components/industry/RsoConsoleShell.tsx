@@ -11,7 +11,7 @@ import { BriefingsScreen } from '@/components/screens/BriefingsScreen';
 import { FloatingRsoButton } from '@/components/industry/FloatingRsoButton';
 import { IncidentModal } from '@/components/industry/IncidentModal';
 import { IncidentItem } from '@/components/industry/IncidentTape';
-import { Profile } from '@/types/database';
+import { Profile, ROLE_LEVELS, UserRole } from '@/types/database';
 import { ZoneCreationModal } from '@/components/tactical/ZoneCreationModal';
 
 interface RsoConsoleShellProps {
@@ -27,11 +27,7 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
   const [refreshZonesCounter, setRefreshZonesCounter] = useState(0);
 
   // Control RBAC: role_level >= 60 (RSO, CONTROL_TOWER, ORG_ADMIN)
-  const roleLevel = profile?.role_level ?? (
-    profile?.role === 'ORG_ADMIN' ? 100 :
-    profile?.role === 'CONTROL_TOWER' ? 80 :
-    profile?.role === 'RSO' ? 60 : 40
-  );
+  const roleLevel = profile?.role_level ?? (profile?.role ? ROLE_LEVELS[profile.role as keyof typeof ROLE_LEVELS] : 40);
   const canManageZones = roleLevel >= 60;
 
   const screenTitles: Record<ScreenId, string> = {
