@@ -101,7 +101,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       .eq('is_active', true)
       .single();
 
-    if (profileError || !profile || !['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
+    if (profileError || !profile || !['RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role)) {
       return NextResponse.json(
         { error: 'Rol insuficiente: Se requiere rol RSO o Administrador activo para modificar datos de viajeros.' },
         { status: 403 }
@@ -280,7 +280,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       .eq('is_active', true)
       .single();
 
-    if (profileError || !profile || !['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
+    if (profileError || !profile || !['RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role)) {
       return NextResponse.json(
         { error: 'Rol insuficiente: Se requiere rol RSO o Administrador activo para dar de baja viajeros.' },
         { status: 403 }

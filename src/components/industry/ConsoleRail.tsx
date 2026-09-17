@@ -2,12 +2,15 @@
 
 import React from 'react';
 import { Globe, MapPin, Users, Radio, FileText } from 'lucide-react';
+import { UserRole, hasScreenAccess } from '@/types/database';
 
 export type ScreenId = 'situacion' | 'terreno' | 'personas' | 'mensajes' | 'briefings';
 
 interface ConsoleRailProps {
   activeScreen: ScreenId;
   onSelectScreen: (screen: ScreenId) => void;
+  currentRole?: UserRole;
+  screenAccess?: Record<string, boolean> | null;
 }
 
 const NAV_ITEMS: { id: ScreenId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -21,13 +24,18 @@ const NAV_ITEMS: { id: ScreenId; label: string; icon: React.ComponentType<{ clas
 export const ConsoleRail: React.FC<ConsoleRailProps> = ({
   activeScreen,
   onSelectScreen,
+  currentRole = 'ORG_ADMIN',
+  screenAccess,
 }) => {
+  const visibleNavItems = NAV_ITEMS.filter((item) =>
+    hasScreenAccess(currentRole, screenAccess, item.id)
+  );
   return (
     <nav
       className="rail w-[var(--rail)] border-r border-[var(--color-divider)] flex flex-col items-center pt-3 gap-1 bg-[var(--color-bg)] z-40 select-none"
       aria-label="Navegación principal de pantallas"
     >
-      {NAV_ITEMS.map((item) => {
+      {visibleNavItems.map((item) => {
         const Icon = item.icon;
         const isActive = activeScreen === item.id;
 

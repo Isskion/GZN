@@ -1,89 +1,31 @@
-'use client';
+import { createClient } from '@/lib/supabase/server';
+import { redirect } from 'next/navigation';
+import { RsoConsoleShell } from '@/components/industry/RsoConsoleShell';
+import { Profile } from '@/types/database';
 
-import React, { useState } from 'react';
-import { ConsoleHeader } from '@/components/industry/ConsoleHeader';
-import { ConsoleRail, ScreenId } from '@/components/industry/ConsoleRail';
-import { TerrenoScreen } from '@/components/screens/TerrenoScreen';
-import { PersonasScreen } from '@/components/screens/PersonasScreen';
-import { SituacionScreen } from '@/components/screens/SituacionScreen';
-import { MensajesScreen } from '@/components/screens/MensajesScreen';
-import { BriefingsScreen } from '@/components/screens/BriefingsScreen';
-import { FloatingRsoButton } from '@/components/industry/FloatingRsoButton';
-import { IncidentModal } from '@/components/industry/IncidentModal';
-import { IncidentItem } from '@/components/industry/IncidentTape';
+/**
+ * Puerta de Entrada Principal a la Consola RSO (Server Component).
+ *
+ * Valida de forma estricta que exista una sesión activa en Supabase Auth.
+ * Si no hay sesión válida, redirige inmediatamente a /login.
+ * Si la sesión es válida, carga el perfil del usuario para scoped RBAC y renderiza la consola.
+ */
+export default async function Page() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
 
-export default function RsoConsoleShell() {
-  const [activeScreen, setActiveScreen] = useState<ScreenId>('terreno');
-  const [alertsCount, setAlertsCount] = useState<number>(1);
-  const [activeIncidentModal, setActiveIncidentModal] = useState<IncidentItem | null>(null);
+  if (error || !user) {
+    redirect('/login');
+  }
 
-  const screenTitles: Record<ScreenId, string> = {
-    terreno: 'Terreno / Sector Táctico',
-    situacion: 'Situación Global',
-    personas: 'Cartera de Personas',
-    briefings: 'Sala de Briefings Tácticos',
-    mensajes: 'Canal de Avisos',
-  };
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('*, organization:organizations(*)')
+    .eq('id', user.id)
+    .maybeSingle();
 
-  const handleOpenActiveAlertModal = () => {
-    setActiveIncidentModal({
-      id: 'crit-01',
-      title: 'Incursión Perímetro Norte',
-      detail: 'Telemetría detecta cruce de geocerca en zona hostil de exclusión militar.',
-      time: '19:42:10',
-      severity: 'CRIT',
-      targetCallsign: 'CONVOY-ALFA',
-    });
-  };
-
-  return (
-    <div id="app" className="grid grid-rows-[auto_1fr] h-screen bg-[var(--color-bg)] text-[var(--color-text)] font-body overflow-hidden">
-      {/* Topbar del Sistema Industry */}
-      <ConsoleHeader
-        alertsCount={alertsCount}
-        activeScreenTitle={screenTitles[activeScreen]}
-        onAlertPillClick={handleOpenActiveAlertModal}
-      />
-
-      {/* Cuerpo principal con Rail y Pantalla Activa */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Rail Vertical Fijo de 56px */}
-        <ConsoleRail
-          activeScreen={activeScreen}
-          onSelectScreen={setActiveScreen}
-        />
-
-        {/* Contenedor de la Pantalla Activa */}
-        <div className="flex-1 min-h-0 relative overflow-hidden">
-          {activeScreen === 'terreno' && (
-            <TerrenoScreen onAlertTriggered={(count) => setAlertsCount(count)} />
-          )}
-          {activeScreen === 'situacion' && (
-            <SituacionScreen
-              onSelectIncident={(inc) => setActiveIncidentModal(inc)}
-              onNavigateTerreno={() => setActiveScreen('terreno')}
-            />
-          )}
-          {activeScreen === 'personas' && <PersonasScreen />}
-          {activeScreen === 'briefings' && <BriefingsScreen />}
-          {activeScreen === 'mensajes' && <MensajesScreen />}
-        </div>
-      </div>
-
-      {/* Botón Flotante de Acción Rápida RSO */}
-      <FloatingRsoButton
-        onNavigateScreen={setActiveScreen}
-        onSimulatePing={() => {
-          setAlertsCount((prev) => prev);
-        }}
-      />
-
-      {/* Modal de Triaje y Protocolo Táctico de Incidentes */}
-      <IncidentModal
-        incident={activeIncidentModal}
-        onClose={() => setActiveIncidentModal(null)}
-        onAcknowledge={() => setAlertsCount(0)}
-      />
-    </div>
-  );
+  return <RsoConsoleShell user={user} profile={profile as Profile | null} />;
 }

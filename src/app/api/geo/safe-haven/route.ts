@@ -100,7 +100,7 @@ export async function GET(request: NextRequest) {
         .eq('is_active', true)
         .single();
 
-      if (profileError || !profile || !['OPERATOR', 'RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
+      if (profileError || !profile || !['OPERATOR', 'RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role)) {
         return NextResponse.json(
           { error: 'Acceso denegado: Se requiere rol operativo o de gestión activo para consultar servicios tácticos.' },
           { status: 403 }

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { logout } from '@/app/actions/auth';
 
 export type DirectionType = 'mesa' | 'sala' | 'pliego';
 
@@ -10,6 +11,8 @@ interface ConsoleHeaderProps {
   activeScreenTitle?: string;
   currentDirection?: DirectionType;
   onDirectionChange?: (dir: DirectionType) => void;
+  userEmail?: string | null;
+  userRole?: string | null;
 }
 
 const DIRNOTES: Record<DirectionType, string> = {
@@ -24,6 +27,8 @@ export const ConsoleHeader: React.FC<ConsoleHeaderProps> = ({
   activeScreenTitle = 'Situación global',
   currentDirection = 'sala',
   onDirectionChange,
+  userEmail,
+  userRole,
 }) => {
   const [direction, setDirection] = useState<DirectionType>(currentDirection);
   const [utcTime, setUtcTime] = useState<string>('');
@@ -53,11 +58,18 @@ export const ConsoleHeader: React.FC<ConsoleHeaderProps> = ({
 
   return (
     <header className="topbar h-[52px] border-b border-[var(--color-divider)] bg-[var(--color-bg)] flex items-center px-4 gap-4 z-[500] select-none text-[var(--color-text)]">
-      <div className="brand flex items-baseline gap-2 font-heading font-semibold text-[19px] tracking-[0.06em]">
-        <span>GZN</span>
-        <small className="font-body font-medium text-[10px] tracking-[0.18em] uppercase opacity-55">
-          Green Zone Navigator
-        </small>
+      <div className="brand flex items-center gap-2.5 font-heading font-semibold text-[19px] tracking-[0.06em]">
+        <img
+          src="/logo/gzn-mark.svg"
+          alt="GZN"
+          className="w-7 h-7 object-contain flex-none"
+        />
+        <div className="flex flex-col leading-none">
+          <span className="font-heading font-bold text-[17px] tracking-[0.08em] leading-tight">GZN</span>
+          <small className="font-body font-medium text-[9px] tracking-[0.16em] uppercase opacity-55">
+            Green Zone Navigator
+          </small>
+        </div>
       </div>
 
       <span className="kicker hidden md:inline text-xs opacity-75 border-l border-[var(--color-divider)] pl-3">
@@ -112,6 +124,31 @@ export const ConsoleHeader: React.FC<ConsoleHeaderProps> = ({
           />
           <span>{alertsCount} abiertas</span>
         </button>
+
+        {/* Usuario autenticado y Botón de Desconexión */}
+        <div className="flex items-center gap-2.5 border-l border-[var(--color-divider)] pl-3">
+          {userEmail && (
+            <div className="hidden lg:flex flex-col items-end text-right leading-none">
+              <span className="font-heading font-semibold text-[11px] tracking-[0.06em] text-[var(--color-text)]">
+                {userEmail}
+              </span>
+              {userRole && (
+                <span className="font-mono text-[9px] tracking-[0.1em] text-[var(--color-accent)] uppercase mt-0.5">
+                  [{userRole}]
+                </span>
+              )}
+            </div>
+          )}
+          <form action={logout}>
+            <button
+              type="submit"
+              title="Cerrar sesión táctica"
+              className="font-heading font-semibold text-[11px] tracking-[0.1em] uppercase px-2.5 py-1 border border-[var(--color-divider)] rounded-[var(--radius-sm)] text-[var(--color-text)] opacity-70 hover:opacity-100 hover:border-[var(--risk-crit)] hover:text-[var(--risk-crit)] hover:bg-[color-mix(in_srgb,var(--risk-crit)_10%,transparent)] transition-all cursor-pointer"
+            >
+              Salir
+            </button>
+          </form>
+        </div>
       </div>
     </header>
   );

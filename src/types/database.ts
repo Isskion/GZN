@@ -1,4 +1,54 @@
-export type UserRole = 'SUPER_ADMIN' | 'ORG_ADMIN' | 'RSO' | 'OPERATOR';
+export type UserRole = 'ORG_ADMIN' | 'CONTROL_TOWER' | 'RSO' | 'OPERATOR';
+
+export const ROLE_LEVELS: Record<UserRole, number> = {
+  ORG_ADMIN: 100,
+  CONTROL_TOWER: 80,
+  RSO: 60,
+  OPERATOR: 40,
+};
+
+export const DEFAULT_ROLE_SCREEN_ACCESS: Record<UserRole, Record<string, boolean>> = {
+  ORG_ADMIN: {
+    terreno: true,
+    situacion: true,
+    personas: true,
+    briefings: true,
+    mensajes: true,
+  },
+  CONTROL_TOWER: {
+    terreno: true,
+    situacion: true,
+    personas: true,
+    briefings: true,
+    mensajes: true,
+  },
+  RSO: {
+    terreno: true,
+    situacion: false, // Activable por excepción para RSOs multi-zona
+    personas: true,
+    briefings: true,
+    mensajes: true,
+  },
+  OPERATOR: {
+    terreno: true,
+    situacion: false,
+    personas: true,
+    briefings: true,
+    mensajes: false,
+  },
+};
+
+export function hasScreenAccess(
+  role: UserRole,
+  screenAccess: Record<string, boolean> | null | undefined,
+  screenId: string
+): boolean {
+  if (screenAccess && typeof screenAccess[screenId] === 'boolean') {
+    return screenAccess[screenId];
+  }
+  return DEFAULT_ROLE_SCREEN_ACCESS[role]?.[screenId] ?? false;
+}
+
 export type TravelerStatus = 'SAFE' | 'WARNING' | 'DANGER' | 'PANIC' | 'INCOMMUNICADO';
 export type ZoneSeverity = 'RED' | 'AMBER' | 'SAFE_HAVEN' | 'CORRIDOR';
 export type AlertType = 'ZONE_VIOLATION' | 'PANIC_BUTTON' | 'DEAD_MAN_TRIGGER' | 'DURESS_PIN' | 'DEVIATION' | 'MANUAL_SOS';
@@ -19,6 +69,10 @@ export interface Profile {
   organization_id: string;
   full_name: string;
   role: UserRole;
+  role_level: number;
+  admin_origin?: 'GZN' | 'CLIENT' | null;
+  supervising_rso_id?: string | null;
+  screen_access?: Record<string, boolean> | null;
   phone?: string | null;
   emergency_contact?: string | null;
   is_active: boolean;
@@ -49,6 +103,7 @@ export interface Zone {
   id: string;
   organization_id: string;
   created_by?: string | null;
+  assigned_rso_id?: string | null;
   name: string;
   description?: string | null;
   severity: ZoneSeverity;

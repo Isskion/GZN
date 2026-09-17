@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
       .eq('is_active', true)
       .single();
 
-    if (profileError || !profile || !['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
+    if (profileError || !profile || !['RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role)) {
       return NextResponse.json(
         { error: 'Rol insuficiente: Se requiere rol RSO o Administrador activo para dar de alta viajeros.' },
         { status: 403 }

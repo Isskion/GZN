@@ -12,7 +12,15 @@ import {
   setHereActiveLayer,
   HERE_LAYER_PREFIX,
 } from '../src/lib/geo/hereMapStyles';
+import {
+  ROLE_LEVELS,
+  DEFAULT_ROLE_SCREEN_ACCESS,
+  hasScreenAccess,
+  UserRole,
+} from '../src/types/database';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 async function runTests() {
   console.log('================================================================');
@@ -382,19 +390,20 @@ async function runTests() {
   // ----------------------------------------------------------------------------
   console.log('\n--- 6. Gestión Completa de Zonas: PATCH & DELETE (Paquete B2) ---');
 
-  // Control de rol estricto con validación de perfil activo (Mandato Claude)
+  // Control de rol estricto con validación de perfil activo (Mandato Claude & Hoja de Ruta v0.44)
   function checkZoneManagementRole(profile: { role?: string; is_active?: boolean } | null): { authorized: boolean; reason?: string } {
     if (!profile) return { authorized: false, reason: 'profile_not_found' };
     if (!profile.is_active) return { authorized: false, reason: 'profile_inactive' };
-    if (!['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role || '')) {
+    if (!['RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role || '')) {
       return { authorized: false, reason: 'insufficient_role' };
     }
     return { authorized: true };
   }
 
   assert(checkZoneManagementRole({ role: 'RSO', is_active: true }).authorized === true, 'RSO activo autorizado');
+  assert(checkZoneManagementRole({ role: 'CONTROL_TOWER', is_active: true }).authorized === true, 'CONTROL_TOWER activo autorizado');
   assert(checkZoneManagementRole({ role: 'ORG_ADMIN', is_active: true }).authorized === true, 'ORG_ADMIN activo autorizado');
-  assert(checkZoneManagementRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === true, 'SUPER_ADMIN activo autorizado');
+  assert(checkZoneManagementRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === false, 'SUPER_ADMIN retirado y rechazado (403)');
   assert(checkZoneManagementRole({ role: 'OPERATOR', is_active: true }).authorized === false, 'OPERATOR activo rechazado (403)');
   assert(checkZoneManagementRole({ role: 'RSO', is_active: false }).authorized === false, 'RSO inactivo rechazado por is_active=false (403)');
   assert(checkZoneManagementRole(null).authorized === false, 'Perfil inexistente rechazado (403)');
@@ -464,19 +473,20 @@ async function runTests() {
   // ----------------------------------------------------------------------------
   console.log('\n--- 7. Gestión de Viajeros y Terminales Hardware (Paquete B3) ---');
 
-  // 1. Control de rol estricto para gestión de viajeros (Mandato Claude 1)
+  // 1. Control de rol estricto para gestión de viajeros (Mandato Claude 1 & Hoja de Ruta v0.44)
   function checkTravelerManagementRole(profile: { role?: string; is_active?: boolean } | null): { authorized: boolean; reason?: string } {
     if (!profile) return { authorized: false, reason: 'profile_not_found' };
     if (!profile.is_active) return { authorized: false, reason: 'profile_inactive' };
-    if (!['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role || '')) {
+    if (!['RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role || '')) {
       return { authorized: false, reason: 'insufficient_role' };
     }
     return { authorized: true };
   }
 
   assert(checkTravelerManagementRole({ role: 'RSO', is_active: true }).authorized === true, 'RSO activo autorizado para viajeros');
+  assert(checkTravelerManagementRole({ role: 'CONTROL_TOWER', is_active: true }).authorized === true, 'CONTROL_TOWER activo autorizado para viajeros');
   assert(checkTravelerManagementRole({ role: 'ORG_ADMIN', is_active: true }).authorized === true, 'ORG_ADMIN activo autorizado para viajeros');
-  assert(checkTravelerManagementRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === true, 'SUPER_ADMIN activo autorizado para viajeros');
+  assert(checkTravelerManagementRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === false, 'SUPER_ADMIN retirado y rechazado para viajeros');
   assert(checkTravelerManagementRole({ role: 'OPERATOR', is_active: true }).authorized === false, 'OPERATOR activo rechazado (403) para gestión de viajeros');
   assert(checkTravelerManagementRole({ role: 'RSO', is_active: false }).authorized === false, 'RSO inactivo rechazado por is_active=false (403)');
   assert(checkTravelerManagementRole(null).authorized === false, 'Perfil nulo rechazado (403)');
@@ -599,7 +609,7 @@ async function runTests() {
   function checkTacticalServiceRole(profile: { role?: string; is_active?: boolean } | null): { authorized: boolean; reason?: string } {
     if (!profile) return { authorized: false, reason: 'profile_not_found' };
     if (!profile.is_active) return { authorized: false, reason: 'profile_inactive' };
-    if (!['OPERATOR', 'RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role || '')) {
+    if (!['OPERATOR', 'RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role || '')) {
       return { authorized: false, reason: 'insufficient_role' };
     }
     return { authorized: true };
@@ -607,8 +617,9 @@ async function runTests() {
 
   assert(checkTacticalServiceRole({ role: 'OPERATOR', is_active: true }).authorized === true, 'OPERATOR activo autorizado para servicios tácticos');
   assert(checkTacticalServiceRole({ role: 'RSO', is_active: true }).authorized === true, 'RSO activo autorizado para servicios tácticos');
+  assert(checkTacticalServiceRole({ role: 'CONTROL_TOWER', is_active: true }).authorized === true, 'CONTROL_TOWER activo autorizado para servicios tácticos');
   assert(checkTacticalServiceRole({ role: 'ORG_ADMIN', is_active: true }).authorized === true, 'ORG_ADMIN activo autorizado para servicios tácticos');
-  assert(checkTacticalServiceRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === true, 'SUPER_ADMIN activo autorizado para servicios tácticos');
+  assert(checkTacticalServiceRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === false, 'SUPER_ADMIN retirado y rechazado para servicios tácticos');
   assert(checkTacticalServiceRole({ role: 'OPERATOR', is_active: false }).authorized === false, 'OPERATOR inactivo rechazado por is_active=false (403)');
   assert(checkTacticalServiceRole({ role: 'RSO', is_active: false }).authorized === false, 'RSO inactivo rechazado por is_active=false (403)');
   assert(checkTacticalServiceRole(null).authorized === false, 'Perfil nulo rechazado (401/403)');
@@ -702,15 +713,16 @@ async function runTests() {
   function checkBriefingMutationRole(profile: { role?: string; is_active?: boolean } | null): { authorized: boolean; reason?: string } {
     if (!profile) return { authorized: false, reason: 'profile_not_found' };
     if (!profile.is_active) return { authorized: false, reason: 'profile_inactive' };
-    if (!['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role || '')) {
+    if (!['RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role || '')) {
       return { authorized: false, reason: 'insufficient_role' };
     }
     return { authorized: true };
   }
 
   assert(checkBriefingMutationRole({ role: 'RSO', is_active: true }).authorized === true, 'RSO activo autorizado para redactar briefings');
+  assert(checkBriefingMutationRole({ role: 'CONTROL_TOWER', is_active: true }).authorized === true, 'CONTROL_TOWER activo autorizado para redactar briefings');
   assert(checkBriefingMutationRole({ role: 'ORG_ADMIN', is_active: true }).authorized === true, 'ORG_ADMIN activo autorizado para redactar briefings');
-  assert(checkBriefingMutationRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === true, 'SUPER_ADMIN activo autorizado para redactar briefings');
+  assert(checkBriefingMutationRole({ role: 'SUPER_ADMIN', is_active: true }).authorized === false, 'SUPER_ADMIN retirado y rechazado para redactar briefings');
   assert(checkBriefingMutationRole({ role: 'OPERATOR', is_active: true }).authorized === false, 'OPERATOR activo rechazado (403) para mutación de briefings');
   assert(checkBriefingMutationRole({ role: 'RSO', is_active: false }).authorized === false, 'RSO inactivo rechazado por is_active=false (403)');
   assert(checkBriefingMutationRole(null).authorized === false, 'Perfil nulo rechazado (401/403)');
@@ -858,6 +870,74 @@ async function runTests() {
   assert(coordsHemisferioSur.hemispheres.latHem === 'S', 'Hemisferio Sur (S) detectado');
   assert(coordsHemisferioSur.hemispheres.lonHem === 'E', 'Hemisferio Este (E) detectado');
   assert(coordsHemisferioSur.dms.includes('12°02\'') && coordsHemisferioSur.dms.includes('S'), 'DMS latitud Sur formateada correctamente');
+
+  // ----------------------------------------------------------------------------
+  // 11. Jerarquía de Roles y Control de Pantallas (Módulo Roles v2)
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 11. Jerarquía de Roles y Control de Pantallas (Módulo Roles v2) ---');
+
+  assert(ROLE_LEVELS.ORG_ADMIN === 100, 'ORG_ADMIN nivel 100 asignado');
+  assert(ROLE_LEVELS.CONTROL_TOWER === 80, 'CONTROL_TOWER nivel 80 asignado');
+  assert(ROLE_LEVELS.RSO === 60, 'RSO nivel 60 asignado');
+  assert(ROLE_LEVELS.OPERATOR === 40, 'OPERATOR nivel 40 asignado');
+  assert(
+    ROLE_LEVELS.ORG_ADMIN > ROLE_LEVELS.CONTROL_TOWER &&
+    ROLE_LEVELS.CONTROL_TOWER > ROLE_LEVELS.RSO &&
+    ROLE_LEVELS.RSO > ROLE_LEVELS.OPERATOR,
+    'Jerarquía numérica estricta ORG_ADMIN (100) > CONTROL_TOWER (80) > RSO (60) > OPERATOR (40)'
+  );
+
+  // Verificación de DEFAULT_ROLE_SCREEN_ACCESS
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.OPERATOR.terreno === true, 'OPERATOR accede a terreno por defecto');
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.OPERATOR.personas === true, 'OPERATOR accede a personas por defecto');
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.OPERATOR.situacion === false, 'OPERATOR NO accede a situacion por defecto');
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.OPERATOR.mensajes === false, 'OPERATOR NO accede a mensajes por defecto');
+
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.RSO.terreno === true, 'RSO accede a terreno por defecto');
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.RSO.briefings === true, 'RSO accede a briefings por defecto');
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.RSO.mensajes === true, 'RSO accede a mensajes por defecto');
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.RSO.situacion === false, 'RSO NO accede a situacion por defecto (solo por excepción)');
+
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.CONTROL_TOWER.situacion === true, 'CONTROL_TOWER accede a situacion por defecto');
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.CONTROL_TOWER.terreno === true, 'CONTROL_TOWER accede a terreno por defecto');
+
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.ORG_ADMIN.situacion === true, 'ORG_ADMIN accede a situacion por defecto');
+  assert(DEFAULT_ROLE_SCREEN_ACCESS.ORG_ADMIN.mensajes === true, 'ORG_ADMIN accede a mensajes por defecto');
+
+  // Verificación helper hasScreenAccess(role, screenAccess, screenId)
+  assert(hasScreenAccess('OPERATOR', null, 'terreno') === true, 'hasScreenAccess autoriza terreno para OPERATOR sin override');
+  assert(hasScreenAccess('OPERATOR', null, 'situacion') === false, 'hasScreenAccess deniega situacion para OPERATOR sin override');
+  assert(hasScreenAccess('OPERATOR', { situacion: true }, 'situacion') === true, 'hasScreenAccess respeta override granular true');
+  assert(hasScreenAccess('ORG_ADMIN', { situacion: false }, 'situacion') === false, 'hasScreenAccess respeta override granular false');
+  assert(hasScreenAccess('RSO', null, 'inexistente') === false, 'hasScreenAccess deniega pantalla inexistente');
+
+  // ----------------------------------------------------------------------------
+  // 12. Identidad Corporativa y Assets Vectoriales
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 12. Identidad Corporativa y Assets Vectoriales ---');
+
+  const sealPath = path.join(process.cwd(), 'public/logo/gzn-seal-full.svg');
+  const wordmarkPath = path.join(process.cwd(), 'public/logo/gzn-wordmark-full.svg');
+  const markPath = path.join(process.cwd(), 'public/logo/gzn-mark.svg');
+  const iconPath = path.join(process.cwd(), 'src/app/icon.svg');
+
+  assert(fs.existsSync(sealPath), 'Asset public/logo/gzn-seal-full.svg existe');
+  assert(fs.existsSync(wordmarkPath), 'Asset public/logo/gzn-wordmark-full.svg existe');
+  assert(fs.existsSync(markPath), 'Asset public/logo/gzn-mark.svg existe');
+  assert(fs.existsSync(iconPath), 'Asset src/app/icon.svg existe');
+
+  const sealContent = fs.readFileSync(sealPath, 'utf8');
+  assert(sealContent.includes('AD ASTRA PER ASPERA'), 'Sello ceremonial contiene lema perimetral');
+  assert(sealContent.includes('#5980a6'), 'Sello ceremonial utiliza token Industry #5980a6');
+
+  const markContent = fs.readFileSync(markPath, 'utf8');
+  assert(markContent.includes('viewBox="63 55 74 102"'), 'Marca reducida tiene viewBox recortado y optimizado (63 55 74 102)');
+  assert(markContent.includes('>GZN<'), 'Marca reducida contiene texto central GZN');
+  assert(!markContent.includes('AD ASTRA PER ASPERA'), 'Marca reducida excluye anillo de texto para máxima legibilidad a escala');
+  assert(markContent.includes('#2f4a63'), 'Marca reducida incluye trazo de contraste #2f4a63');
+
+  const wordmarkContent = fs.readFileSync(wordmarkPath, 'utf8');
+  assert(wordmarkContent.includes('GREEN ZONE NAVIGATOR'), 'Wordmark incluye subtítulo oficial GREEN ZONE NAVIGATOR');
 
   // ----------------------------------------------------------------------------
   // Resumen

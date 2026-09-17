@@ -64,7 +64,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         .eq('is_active', true)
         .single();
 
-      if (profileError || !profile || !['OPERATOR', 'RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
+      if (profileError || !profile || !['OPERATOR', 'RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role)) {
         return NextResponse.json(
           { error: 'Acceso denegado: Se requiere rol activo en la organización para consultar briefings.' },
           { status: 403 }
@@ -135,7 +135,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       .eq('is_active', true)
       .single();
 
-    if (profileError || !profile || !['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
+    if (profileError || !profile || !['RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role)) {
       return NextResponse.json(
         { error: 'Rol insuficiente: Se requiere rol RSO o Administrador activo para modificar briefings de misión.' },
         { status: 403 }
@@ -298,7 +298,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       .eq('is_active', true)
       .single();
 
-    if (profileError || !profile || !['RSO', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(profile.role)) {
+    if (profileError || !profile || !['RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(profile.role)) {
       return NextResponse.json(
         { error: 'Rol insuficiente: Se requiere rol RSO o Administrador activo para eliminar briefings de misión.' },
         { status: 403 }
