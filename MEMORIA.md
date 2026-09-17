@@ -623,10 +623,22 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   **Situación Global con D3 Natural Earth (`SituacionScreen.tsx`)**: Integración de mapa interactivo con `d3.geoNaturalEarth1()` y TopoJSON local (`public/data/countries-110m.json`, 106 KB) que permite seleccionar teatros de operaciones y abrir su ficha técnica, preservando el rótulo explícito de simulación OPSEC.
     *   **Alineación de Valores por Defecto**: Arranque de consola garantizado en dirección `sala` (`data-dir="sala"`, modo nocturno de operaciones 24/7) y pantalla principal `terreno`.
     *   **Cero Regresiones**: 155/155 tests bloqueantes en verde y compilación de producción Next.js 15.5 limpia (código de salida 0). Cero migraciones SQL y cero rutas API nuevas.
-18. [ ] **Próximo Hito — Consola Web RSO: Conexión de Datos Reales y Autenticación Staff (Módulos 1, 3, 4 y 5):**
+18. [x] **Seguridad y Control de Acceso — Rediseño del Modelo de Roles, Jerarquía y Scoping Geográfico (2026-09-17):**
+    *   **Extirpación Total de `SUPER_ADMIN`**: Eliminado en toda la base de datos (PostgreSQL CHECK), políticas RLS, RPCs y rutas API de Next.js, sustituido por el modelo jerárquico unidimensional de 4 roles (`ORG_ADMIN: 100`, `CONTROL_TOWER: 80`, `RSO: 60`, `OPERATOR: 40`).
+    *   **Migración 008 (`sql/008_roles_redesign_and_scoping.sql`)**: Saneamiento previo retroactivo, trigger de sincronización `sync_profile_role_level()`, backfill explícito obligatorio, función `get_auth_role_level()` `SECURITY DEFINER`, columna `assigned_rso_id` en tabla `zones` con índice relacional, y redefinición estricta de políticas RLS.
+    *   **Correcciones de Auditoría Incorporadas**: Preservación del autoservicio de edición de perfiles (`id = auth.uid() OR role_level >= 100`), umbral de lectura de `audit_logs` elevado a `role_level >= 80` (`CONTROL_TOWER` y `ORG_ADMIN`), y eliminación precisa de políticas previas de `travelers`.
+    *   **Control de Navegación Desacoplado**: Matriz `DEFAULT_ROLE_SCREEN_ACCESS` y función `hasScreenAccess()` en `src/types/database.ts` con soporte para overrides JSONB granulares en `profiles.screen_access`, filtrando las pantallas disponibles en `ConsoleRail`.
+19. [x] **Identidad Corporativa Oficial, Pantalla de Login y Puerta de Sesión (2026-09-17):**
+    *   **Identidad Corporativa Vectorial**: Integración de los activos de `Logo/exports/` en 3 niveles de uso: Sello ceremonial completo (`public/logo/gzn-seal-full.svg`, `gzn-wordmark-full.svg`) para hero de login y splash; Marca reducida recortada del escudo (`public/logo/gzn-mark.svg`, `viewBox="63 55 74 102"`) para chrome pequeño de 28px sin empastado tipográfico; y Favicon nativo Next.js App Router (`src/app/icon.svg` y `metadata.icons` en `layout.tsx`).
+    *   **Puerta de Sesión en Consola (`src/app/page.tsx`)**: Transformación a Server Component con validación estricta de sesión activa mediante `supabase.auth.getUser()`, redirección inmediata a `/login` si no está autenticado, carga del perfil del usuario y delegación al shell `RsoConsoleShell`.
+    *   **Pantalla de Login Industry (`src/app/login/page.tsx`)**: Diseño split-panel con hero táctico nocturno (`#151718`), sello oficial de 176px y métricas C2 a la izquierda; tarjeta `.blueprint` con marcas `+` en las cuatro esquinas, banner de error de Supabase reactivo y formulario de credenciales seguras a la derecha. Cero botones de Google OAuth y cero registros públicos.
+    *   **Server Actions de Autenticación (`src/app/actions/auth.ts`)**: Acciones `login(formData)` y `logout()` basadas en cookies seguras `@supabase/ssr` con revalidación de caché de rutas.
+    *   **Control de Usuario en Topbar (`ConsoleHeader.tsx`)**: Integración del imagotipo de escudo (28px), visualización del correo y rol activo del usuario, y botón de desconexión "Salir".
+    *   **Calidad y Compilación**: Suite ampliada a 192 pruebas automatizadas (`scripts/test-bloqueantes.ts`) con 100% de éxito y compilación de producción Next.js 15.5 (`pnpm build`) limpia en 2.1s.
+20. [ ] **Próximo Hito — Consola Web RSO: Conexión de Datos Reales y Autenticación Staff (Módulos 1, 3, 4 y 5):**
     *   Sustitución de estados mock locales en `TerrenoScreen` por llamadas a endpoints de backend (`GET /api/zones`, `GET /api/alerts`).
     *   Herramienta de dibujo interactivo de zonas tácticas (`POST /api/zones`) y triaje de alertas (`PATCH /api/alerts/[id]`).
-19. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
+21. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
     *   Desarrollo de la aplicación móvil de campo (Flutter / React Native) conectada a la infraestructura backend y sus endpoints autenticados.
 
 ---
