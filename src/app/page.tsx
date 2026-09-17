@@ -7,6 +7,8 @@ import { TerrenoScreen } from '@/components/screens/TerrenoScreen';
 import { PersonasScreen } from '@/components/screens/PersonasScreen';
 import { SituacionScreen } from '@/components/screens/SituacionScreen';
 import { MensajesScreen } from '@/components/screens/MensajesScreen';
+import { BriefingsScreen } from '@/components/screens/BriefingsScreen';
+import { FloatingRsoButton } from '@/components/industry/FloatingRsoButton';
 import { IncidentModal } from '@/components/industry/IncidentModal';
 import { IncidentItem } from '@/components/industry/IncidentTape';
 
@@ -16,9 +18,10 @@ export default function RsoConsoleShell() {
   const [activeIncidentModal, setActiveIncidentModal] = useState<IncidentItem | null>(null);
 
   const screenTitles: Record<ScreenId, string> = {
-    situacion: 'Situación Global',
     terreno: 'Terreno / Sector Táctico',
+    situacion: 'Situación Global',
     personas: 'Cartera de Personas',
+    briefings: 'Sala de Briefings Tácticos',
     mensajes: 'Canal de Avisos',
   };
 
@@ -52,16 +55,28 @@ export default function RsoConsoleShell() {
 
         {/* Contenedor de la Pantalla Activa */}
         <div className="flex-1 min-h-0 relative overflow-hidden">
-          {activeScreen === 'situacion' && (
-            <SituacionScreen onSelectIncident={(inc) => setActiveIncidentModal(inc)} />
-          )}
           {activeScreen === 'terreno' && (
             <TerrenoScreen onAlertTriggered={(count) => setAlertsCount(count)} />
           )}
+          {activeScreen === 'situacion' && (
+            <SituacionScreen
+              onSelectIncident={(inc) => setActiveIncidentModal(inc)}
+              onNavigateTerreno={() => setActiveScreen('terreno')}
+            />
+          )}
           {activeScreen === 'personas' && <PersonasScreen />}
+          {activeScreen === 'briefings' && <BriefingsScreen />}
           {activeScreen === 'mensajes' && <MensajesScreen />}
         </div>
       </div>
+
+      {/* Botón Flotante de Acción Rápida RSO */}
+      <FloatingRsoButton
+        onNavigateScreen={setActiveScreen}
+        onSimulatePing={() => {
+          setAlertsCount((prev) => prev);
+        }}
+      />
 
       {/* Modal de Triaje y Protocolo Táctico de Incidentes */}
       <IncidentModal

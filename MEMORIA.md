@@ -615,10 +615,18 @@ Para garantizar que **NADA** se desarrolle al margen de esta memoria, se han con
     *   Pantalla **Mensajes** (`src/components/screens/MensajesScreen.tsx`): Maqueta visual para composición de boletines tácticos, plantillas operativas (toque de queda, evacuación) y previsualizador en terminal móvil seguro, explícitamente sin backend de emisión masiva (fuera de MVP).
     *   Componente `IncidentModal`: Modal de triaje táctico ante alertas críticas con checklist de protocolo escalonado SOP-04 con tiempos de intervención estimados (`T+0m`, `T+2m`, `T+5m`, etc.).
     *   Compilación de producción Next.js 15.5 (`pnpm build`) verificada exitosamente en 3.7s con cero errores de tipado o linting.
-17. [ ] **Próximo Hito — Consola Web RSO: Conexión de Datos Reales y Autenticación Staff (Módulos 1, 3, 4 y 5):**
+17. [x] **Consola Web RSO — Alineación Look & Feel Industry, Sala de Briefings (B5), Botón RSO y Mapa D3 (2026-09-16):**
+    *   **Preservación del Motor Cartográfico**: Mantenido MapLibre GL v5.1.0 + HERE Technologies v3 HD (Módulo 2, ADR-016) como único motor de cartografía táctica de Terreno, descartando sustitución por Leaflet/OSM. Coordenadas de muestra documentadas explícitamente como telemetría de evaluación libre en el código.
+    *   **Reskinning Táctico Completo a Tokens Industry**: `TacticalHud` y `TacticalLayerSelector` adaptados íntegramente a variables CSS del sistema Industry (`var(--color-surface)`, `var(--color-divider)`, `var(--risk-stable)`, `var(--risk-watch)`, `var(--font-heading)`), incorporando marcas de esquina `.blueprint` y eliminando clases Slate rígidas.
+    *   **Sala de Briefings Tácticos y POIs (`BriefingsScreen.tsx`)**: Nueva pantalla añadida al Rail de navegación y conectada al backend real de misión `GET /api/briefings` (Paquete B5). Desglose de directivas operativas, protocolos de seguridad y POIs clasificados (`EXTRACTION_POINT`, `HOSPITAL`, `POLICE`, `SAFE_HOUSE`, `CHECKPOINT`, `DANGER_POINT`). Manejo estricto de estado desconectado con banner explícito y carga de muestra controlada.
+    *   **Botón Flotante RSO de Acción Rápida (`FloatingRsoButton.tsx`)**: Botón circular 'G' en la esquina inferior derecha con menú táctico desplegable para salto rápido a Terreno, Briefings y Personas, junto con prueba de ping de telemetría explícitamente etiquetada como `[SIM]`, garantizando cero falsos positivos en acciones de seguridad crítica.
+    *   **Situación Global con D3 Natural Earth (`SituacionScreen.tsx`)**: Integración de mapa interactivo con `d3.geoNaturalEarth1()` y TopoJSON local (`public/data/countries-110m.json`, 106 KB) que permite seleccionar teatros de operaciones y abrir su ficha técnica, preservando el rótulo explícito de simulación OPSEC.
+    *   **Alineación de Valores por Defecto**: Arranque de consola garantizado en dirección `sala` (`data-dir="sala"`, modo nocturno de operaciones 24/7) y pantalla principal `terreno`.
+    *   **Cero Regresiones**: 155/155 tests bloqueantes en verde y compilación de producción Next.js 15.5 limpia (código de salida 0). Cero migraciones SQL y cero rutas API nuevas.
+18. [ ] **Próximo Hito — Consola Web RSO: Conexión de Datos Reales y Autenticación Staff (Módulos 1, 3, 4 y 5):**
     *   Sustitución de estados mock locales en `TerrenoScreen` por llamadas a endpoints de backend (`GET /api/zones`, `GET /api/alerts`).
     *   Herramienta de dibujo interactivo de zonas tácticas (`POST /api/zones`) y triaje de alertas (`PATCH /api/alerts/[id]`).
-18. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
+19. [ ] **Hito Futuro — Movilidad / Aplicación Móvil (Sprint 11):**
     *   Desarrollo de la aplicación móvil de campo (Flutter / React Native) conectada a la infraestructura backend y sus endpoints autenticados.
 
 ---

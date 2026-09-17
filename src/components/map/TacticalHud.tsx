@@ -46,84 +46,95 @@ export function TacticalHud({
 
   return (
     <div className="absolute bottom-4 left-4 right-4 z-10 pointer-events-none flex flex-col md:flex-row items-end md:items-center justify-between gap-2">
-      {/* Telemetry Coordinate Box */}
-      <div className="pointer-events-auto bg-slate-950/90 border border-slate-800/90 backdrop-blur-md rounded-xl p-2.5 shadow-2xl text-[11px] font-mono text-slate-300 flex items-center gap-4">
-        {/* Reticle Icon & Target indicator */}
-        <div className="flex items-center gap-2 border-r border-slate-800 pr-3">
-          <div className={`w-6 h-6 rounded-md flex items-center justify-center ${
-            isCursorMode ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-          }`}>
+      {/* Telemetría y Coordenadas con estilo Industry Blueprint */}
+      <div className="pointer-events-auto bg-[var(--color-surface)] border border-[var(--color-divider)] rounded-[var(--radius-sm)] p-2.5 shadow-[var(--shadow-md)] text-[11px] font-mono text-[var(--color-text)] flex items-center gap-4">
+        {/* Retícula de Objetivo */}
+        <div className="flex items-center gap-2 border-r border-[var(--color-divider)] pr-3">
+          <div
+            className={`w-6 h-6 rounded-[var(--radius-sm)] flex items-center justify-center border ${
+              isCursorMode
+                ? 'bg-[color-mix(in_srgb,var(--risk-watch)_16%,transparent)] text-[var(--risk-watch)] border-[var(--risk-watch)]'
+                : 'bg-[color-mix(in_srgb,var(--risk-stable)_16%,transparent)] text-[var(--risk-stable)] border-[var(--risk-stable)]'
+            }`}
+          >
             <Crosshair className="w-3.5 h-3.5 animate-pulse" />
           </div>
           <div>
-            <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">
+            <div className="text-[9px] uppercase tracking-wider opacity-60 font-heading font-semibold">
               {isCursorMode ? 'CURSOR TARGET' : 'CENTRO TÁCTICO'}
             </div>
-            <div className="text-emerald-400 font-bold text-xs">{formatted.dms}</div>
+            <div className="text-[var(--risk-stable)] font-mono font-bold text-xs">{formatted.dms}</div>
           </div>
         </div>
 
         {/* Decimal + Datum */}
-        <div className="hidden sm:block border-r border-slate-800 pr-3">
-          <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">DATUM / PROY</div>
-          <div className="text-slate-300">WGS84 · {formatted.decimal}</div>
+        <div className="hidden sm:block border-r border-[var(--color-divider)] pr-3">
+          <div className="text-[9px] uppercase tracking-wider opacity-60 font-heading font-semibold">DATUM / PROY</div>
+          <div className="text-[var(--color-text)] opacity-90">WGS84 · {formatted.decimal}</div>
         </div>
 
-        {/* Zoom & Bearing */}
+        {/* Zoom & Rumbo */}
         <div className="flex items-center gap-3">
           <div>
-            <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">ZOOM</div>
-            <div className="text-slate-200 font-bold">Z: {zoom.toFixed(2)}</div>
+            <div className="text-[9px] uppercase tracking-wider opacity-60 font-heading font-semibold">ZOOM</div>
+            <div className="font-mono font-bold">Z: {zoom.toFixed(2)}</div>
           </div>
           <div>
-            <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">RUMBO / INCL</div>
-            <div className="text-slate-200 font-bold flex items-center gap-1">
-              <Compass className="w-3 h-3 text-slate-400" />
+            <div className="text-[9px] uppercase tracking-wider opacity-60 font-heading font-semibold">RUMBO / INCL</div>
+            <div className="font-mono font-bold flex items-center gap-1">
+              <Compass className="w-3 h-3 opacity-60" />
               <span>{Math.round(bearing)}° ({cardinal}) · {Math.round(pitch)}°</span>
             </div>
           </div>
         </div>
 
-        {/* Engine Status */}
-        <div className="hidden lg:flex items-center gap-1.5 pl-2 border-l border-slate-800 text-[10px]">
-          <span className={`w-2 h-2 rounded-full ${isHereActive ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
-          <span className={isHereActive ? 'text-emerald-400' : 'text-amber-400'}>
+        {/* Estado del Motor Cartográfico */}
+        <div className="hidden lg:flex items-center gap-1.5 pl-2 border-l border-[var(--color-divider)] text-[10px] font-heading font-semibold uppercase tracking-wider">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              isHereActive ? 'bg-[var(--risk-stable)] animate-ping' : 'bg-[var(--risk-watch)]'
+            }`}
+          />
+          <span className={isHereActive ? 'text-[var(--risk-stable)]' : 'text-[var(--risk-watch)]'}>
             {isHereActive ? 'HERE v3 HD' : 'DEMO TILES'}
           </span>
         </div>
       </div>
 
-      {/* Quick Jump Sector Buttons */}
-      <div className="pointer-events-auto bg-slate-950/90 border border-slate-800/90 backdrop-blur-md rounded-xl p-1.5 shadow-2xl flex items-center gap-1">
+      {/* Botones de Salto Rápido a Sectores Tácticos */}
+      <div className="pointer-events-auto bg-[var(--color-surface)] border border-[var(--color-divider)] rounded-[var(--radius-sm)] p-1.5 shadow-[var(--shadow-md)] flex items-center gap-1.5">
         {onCenterFleet && (
           <button
+            type="button"
             onClick={onCenterFleet}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-mono transition-all border border-slate-800"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-sm)] bg-[var(--color-bg)] hover:bg-[color-mix(in_srgb,var(--color-text)_7%,transparent)] text-[var(--color-text)] hover:text-[var(--color-accent)] text-xs font-heading font-semibold uppercase tracking-wider transition-all border border-[var(--color-divider)]"
             title="Centrar mapa en todo El Rebaño"
           >
-            <Users className="w-3.5 h-3.5 text-emerald-400" />
+            <Users className="w-3.5 h-3.5 text-[var(--color-accent)]" />
             <span className="hidden sm:inline">El Rebaño</span>
           </button>
         )}
 
         {onCenterRedZone && (
           <button
+            type="button"
             onClick={onCenterRedZone}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-mono transition-all border border-slate-800"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-sm)] bg-[var(--color-bg)] hover:bg-[color-mix(in_srgb,var(--color-text)_7%,transparent)] text-[var(--color-text)] hover:text-[var(--risk-crit)] text-xs font-heading font-semibold uppercase tracking-wider transition-all border border-[var(--color-divider)]"
             title="Enfocar Zona Roja de Conflicto"
           >
-            <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+            <ShieldAlert className="w-3.5 h-3.5 text-[var(--risk-crit)]" />
             <span className="hidden sm:inline">Zona Roja</span>
           </button>
         )}
 
         {onCenterSafeHaven && (
           <button
+            type="button"
             onClick={onCenterSafeHaven}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-mono transition-all border border-slate-800"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-sm)] bg-[var(--color-bg)] hover:bg-[color-mix(in_srgb,var(--color-text)_7%,transparent)] text-[var(--color-text)] hover:text-[var(--risk-stable)] text-xs font-heading font-semibold uppercase tracking-wider transition-all border border-[var(--color-divider)]"
             title="Enfocar Embajada y Safe Haven"
           >
-            <Home className="w-3.5 h-3.5 text-emerald-400" />
+            <Home className="w-3.5 h-3.5 text-[var(--risk-stable)]" />
             <span className="hidden sm:inline">Safe Haven</span>
           </button>
         )}

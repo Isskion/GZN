@@ -56,6 +56,9 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({ onAlertTriggered }
   // Motor Cartográfico HERE (Módulo 2)
   const [activeLayer, setActiveLayer] = useState<HereMapStyleId>('explore.night');
   const [cursorCoords, setCursorCoords] = useState<{ lat: number; lon: number } | null>(null);
+  // NOTA OPSEC / TELEMETRÍA DE MUESTRA:
+  // Coordenadas de muestra para evaluación técnica de geocercas y capas tácticas.
+  // La ubicación inicial es un dato de demostración y no un requisito fijo de producto.
   const [centerCoords, setCenterCoords] = useState<{ lat: number; lon: number }>({
     lat: 40.4168,
     lon: -3.7038,

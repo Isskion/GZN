@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'GZN — Consola de Mando RSO | Secure Route',
+  title: 'GZN · Consola RSO | Green Zone Navigator',
   description: 'Sistema de protección y movilidad táctica para personal y convoyes en zonas de riesgo.',
 };
 

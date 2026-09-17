@@ -69,7 +69,7 @@
   --shadow-lg: 0 12px 32px color-mix(in srgb, #2b2b2d 22%, transparent);
 }
 
-/* ── Dirección Sala (Oscura / Sala de Operaciones Táctica - Por defecto en GZN) */
+/* ── Dirección Sala (Oscura / Turno de noche) */
 [data-dir="sala"], html.dark[data-dir="sala"], html[data-dir="sala"] {
   --color-bg: #1d2d3d;
   --color-surface: #2c455d;
@@ -89,6 +89,14 @@
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
+
+/* ── Dirección Pliego (Papel / Editorial) */
+[data-dir="pliego"] {
+  --color-bg: #f5f4f1;
+  --color-surface: #eceae5;
+  --color-divider: color-mix(in srgb, #1d1f20 14%, transparent);
+}
+[data-dir="pliego"] .plate > .corner { display: none; }
 
 /* ── Base y tipografía general ────────────────────────────────── */
 body {
@@ -230,7 +238,7 @@ svg.lucide {
 }
 
 /* ── Form Inputs & Tags ───────────────────────────────────────── */
-.input {
+.input, .inp {
   width: 100%;
   min-height: 34px;
   padding: 6px 10px;
@@ -243,12 +251,12 @@ svg.lucide {
   border-radius: var(--radius-sm);
 }
 
-.input:focus {
+.input:focus, .inp:focus {
   border-color: var(--color-accent);
   outline: none;
 }
 
-.tag {
+.tag, .badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -291,6 +299,41 @@ svg.lucide {
   border-color: var(--risk-neutral);
   color: var(--risk-neutral);
   background: color-mix(in srgb, var(--risk-neutral) 12%, transparent);
+}
+
+/* ── Battery indicator bar (.bat) ─────────────────────────────── */
+.bat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bat u {
+  display: block;
+  width: 34px;
+  height: 7px;
+  border: 1px solid color-mix(in srgb, var(--color-text) 40%, transparent);
+  position: relative;
+  text-decoration: none;
+}
+.bat u::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  width: var(--w, 50%);
+  background: currentColor;
+}
+
+/* ── Scanline en modo sala ─────────────────────────────────────── */
+.scanline {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  background: repeating-linear-gradient(to bottom, color-mix(in srgb, var(--color-text) 4%, transparent) 0 1px, transparent 1px 4px);
+  opacity: 0;
+}
+[data-dir="sala"] .scanline {
+  opacity: 0.6;
 }
 
 /* ── Tactical Pulse ───────────────────────────────────────────── */
