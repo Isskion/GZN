@@ -17,6 +17,7 @@ import {
   setHereActiveLayer,
   type HereMapStyleId,
 } from '@/lib/geo/hereMapStyles';
+import { getSeverityColor, buildSeverityMatchExpression } from '@/lib/geo/tactical-zones';
 import { TacticalLayerSelector } from '@/components/map/TacticalLayerSelector';
 import { TacticalHud } from '@/components/map/TacticalHud';
 import { BlueprintPlate } from '@/components/industry/BlueprintPlate';
@@ -162,16 +163,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
 
           const zType = (f.properties?.zone_type || 'THREAT') as 'RESPONSIBILITY' | 'THREAT';
           const sev = (f.properties?.severity || (zType === 'RESPONSIBILITY' ? 'OPERATIONAL' : 'RED')) as ZoneItem['severity'];
-          const defaultColor =
-            zType === 'RESPONSIBILITY'
-              ? 'var(--color-accent)'
-              : sev === 'RED'
-              ? 'var(--risk-crit)'
-              : sev === 'AMBER'
-              ? 'var(--risk-high)'
-              : sev === 'SAFE_HAVEN'
-              ? 'var(--risk-stable)'
-              : 'var(--risk-watch)';
+          const defaultColor = getSeverityColor(sev, zType, 'css');
 
           return {
             id: String(f.properties?.id || f.id),
@@ -370,25 +362,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
           type: 'fill',
           source: 'gzn-tactical-zones',
           paint: {
-            'fill-color': [
-              'match',
-              ['get', 'zone_type'],
-              'RESPONSIBILITY',
-              '#5980a6',
-              [
-                'match',
-                ['get', 'severity'],
-                'RED',
-                '#e07a6a',
-                'AMBER',
-                '#d8a84f',
-                'SAFE_HAVEN',
-                '#63b598',
-                'CORRIDOR',
-                '#94bce3',
-                '#5980a6',
-              ],
-            ],
+            'fill-color': buildSeverityMatchExpression(),
             'fill-opacity': [
               'match',
               ['get', 'zone_type'],
@@ -406,25 +380,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
           type: 'line',
           source: 'gzn-tactical-zones',
           paint: {
-            'line-color': [
-              'match',
-              ['get', 'zone_type'],
-              'RESPONSIBILITY',
-              '#5980a6',
-              [
-                'match',
-                ['get', 'severity'],
-                'RED',
-                '#e07a6a',
-                'AMBER',
-                '#d8a84f',
-                'SAFE_HAVEN',
-                '#63b598',
-                'CORRIDOR',
-                '#94bce3',
-                '#5980a6',
-              ],
-            ],
+            'line-color': buildSeverityMatchExpression(),
             'line-width': [
               'match',
               ['get', 'zone_type'],

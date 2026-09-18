@@ -25,6 +25,7 @@ import {
   calculateRingAreaKm2,
   ExtractedCountryGeometry,
 } from '@/lib/geo/tactical-zones';
+import { ZoneMiniMap } from './ZoneMiniMap';
 import { validateGeoJSONPolygon } from '@/lib/geo/validation';
 import { ZoneType, ZoneSeverity } from '@/types/database';
 
@@ -736,8 +737,9 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
                 </div>
               </div>
 
-              {/* Panel de configuración según la modalidad activa */}
-              <div className="border border-[var(--color-divider)] bg-[var(--color-surface)] p-4">
+              {/* Panel de configuración y cartografía interactiva según la modalidad activa */}
+              <div className="border border-[var(--color-divider)] bg-[var(--color-surface)] p-4 space-y-4">
+                {/* MODALIDAD 1: PAÍS (Selector TopoJSON) */}
                 {mode === 'country' && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -758,7 +760,7 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
                       />
                     </div>
 
-                    <div className="max-h-40 overflow-y-auto border border-[var(--color-divider)] bg-[var(--color-bg)] divide-y divide-[var(--color-divider)]">
+                    <div className="max-h-36 overflow-y-auto border border-[var(--color-divider)] bg-[var(--color-bg)] divide-y divide-[var(--color-divider)]">
                       {countryList.length === 0 ? (
                         <div className="p-3 text-center text-xs opacity-60 font-mono">
                           No se encontraron países que coincidan con la búsqueda.
@@ -798,8 +800,40 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
                   </div>
                 )}
 
+                {/* MINI-MAPA INTERACTIVO COMPARTIDO (Instancia única de MapLibre GL para los 3 modos) */}
+                <ZoneMiniMap
+                  mode={mode}
+                  centerLng={centerLng}
+                  centerLat={centerLat}
+                  radiusKm={radiusKm}
+                  activeGeometry={activeGeometry}
+                  rawCoordinatesText={rawCoordinatesText}
+                  severity={severity}
+                  zoneType={zoneType}
+                  onCenterChange={(lng, lat) => {
+                    setCenterLng(lng);
+                    setCenterLat(lat);
+                  }}
+                  onAddPoint={([lng, lat]) => {
+                    const newLine = `${lng.toFixed(4)}, ${lat.toFixed(4)}`;
+                    setRawCoordinatesText((prev) =>
+                      prev.trim() ? `${prev.trim()}\n${newLine}` : newLine
+                    );
+                  }}
+                  onClearPoints={() => setRawCoordinatesText('')}
+                  onUndoPoint={() => {
+                    setRawCoordinatesText((prev) => {
+                      const lines = prev.split('\n').map((l) => l.trim()).filter(Boolean);
+                      if (lines.length === 0) return '';
+                      lines.pop();
+                      return lines.join('\n');
+                    });
+                  }}
+                />
+
+                {/* MODALIDAD 2: RADIO TÁCTICO (Ajuste numérico fino y slider de radio) */}
                 {mode === 'radius' && (
-                  <div className="space-y-4">
+                  <div className="space-y-3 pt-2 border-t border-[var(--color-divider)]">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-heading font-semibold uppercase tracking-wider">
                         Buffer Geodésico Regular (64 vértices esféricos)
@@ -858,16 +892,17 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
                   </div>
                 )}
 
+                {/* MODALIDAD 3: POLÍGONO LIBRE (Editor de coordenadas WGS84 sincronizado) */}
                 {mode === 'freehand' && (
-                  <div className="space-y-2">
+                  <div className="space-y-2 pt-2 border-t border-[var(--color-divider)]">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-heading font-semibold uppercase tracking-wider">
-                        Trazado Vectorial Libre (WGS84)
+                        Editor de Vértices Vectoriales (WGS84)
                       </span>
                       <span className="text-[10px] font-mono opacity-60">Formato: Lng, Lat (un vértice por línea)</span>
                     </div>
                     <textarea
-                      rows={4}
+                      rows={3}
                       value={rawCoordinatesText}
                       onChange={(e) => setRawCoordinatesText(e.target.value)}
                       placeholder="-3.7100, 40.4200&#10;-3.6900, 40.4200&#10;-3.6900, 40.4100&#10;-3.7100, 40.4100"

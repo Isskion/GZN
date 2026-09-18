@@ -2,10 +2,79 @@
 // GZN — GENERACIÓN Y ADAPTACIÓN DE GEOMETRÍAS TÁCTICAS (PostGIS / GeoJSON)
 // ==============================================================================
 
+import { ZoneType, ZoneSeverity } from '@/types/database';
+
 export interface ExtractedCountryGeometry {
   polygon: GeoJSON.Polygon;
   excludedCount: number;
   isSimplified: boolean;
+}
+
+// -----------------------------------------------------------------------------
+// PALETA CANÓNICA DE COLORES DE SEVERIDAD Y TIPOLOGÍA TÁCTICA
+// -----------------------------------------------------------------------------
+
+export const SEVERITY_HEX_COLORS: Record<string, string> = {
+  OPERATIONAL: '#5980a6',
+  RED: '#e07a6a',
+  AMBER: '#d8a84f',
+  SAFE_HAVEN: '#63b598',
+  CORRIDOR: '#94bce3',
+};
+
+export const SEVERITY_CSS_COLORS: Record<string, string> = {
+  OPERATIONAL: 'var(--color-accent)',
+  RED: 'var(--risk-crit)',
+  AMBER: 'var(--risk-high)',
+  SAFE_HAVEN: 'var(--risk-stable)',
+  CORRIDOR: 'var(--risk-watch)',
+};
+
+/**
+ * Obtiene el color canónico asociado a la severidad táctica y tipología de una zona.
+ * Fuente única de verdad para la cartografía (MapLibre/WebGL) y componentes C2.
+ *
+ * @param severity Nivel de severidad o régimen táctico
+ * @param zoneType Tipología de zona ('RESPONSIBILITY' | 'THREAT')
+ * @param format Formato deseado ('css' para variables CSS o 'hex' para WebGL/MapLibre)
+ */
+export function getSeverityColor(
+  severity: ZoneSeverity | string,
+  zoneType: ZoneType | string = 'THREAT',
+  format: 'css' | 'hex' = 'css'
+): string {
+  if (zoneType === 'RESPONSIBILITY') {
+    return format === 'hex' ? SEVERITY_HEX_COLORS.OPERATIONAL : SEVERITY_CSS_COLORS.OPERATIONAL;
+  }
+  const colorMap = format === 'hex' ? SEVERITY_HEX_COLORS : SEVERITY_CSS_COLORS;
+  const fallback = format === 'hex' ? SEVERITY_HEX_COLORS.CORRIDOR : SEVERITY_CSS_COLORS.CORRIDOR;
+  return colorMap[severity] || fallback;
+}
+
+/**
+ * Genera la expresión declarativa 'match' de MapLibre para colorear zonas
+ * según su tipología (RESPONSIBILITY) y severidad (RED, AMBER, etc.) en WebGL.
+ */
+export function buildSeverityMatchExpression(): any {
+  return [
+    'match',
+    ['get', 'zone_type'],
+    'RESPONSIBILITY',
+    SEVERITY_HEX_COLORS.OPERATIONAL,
+    [
+      'match',
+      ['get', 'severity'],
+      'RED',
+      SEVERITY_HEX_COLORS.RED,
+      'AMBER',
+      SEVERITY_HEX_COLORS.AMBER,
+      'SAFE_HAVEN',
+      SEVERITY_HEX_COLORS.SAFE_HAVEN,
+      'CORRIDOR',
+      SEVERITY_HEX_COLORS.CORRIDOR,
+      SEVERITY_HEX_COLORS.OPERATIONAL,
+    ],
+  ];
 }
 
 /**

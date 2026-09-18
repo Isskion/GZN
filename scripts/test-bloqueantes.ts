@@ -23,7 +23,15 @@ import {
   extractMainContinentPolygon,
   closeDrawnPolygon,
   calculateRingAreaKm2,
+  getSeverityColor,
+  buildSeverityMatchExpression,
+  SEVERITY_HEX_COLORS,
+  SEVERITY_CSS_COLORS,
 } from '../src/lib/geo/tactical-zones';
+import {
+  buildHereGeocodeUrl,
+  parseHereGeocodeResponse,
+} from '../src/lib/geo/geocoding';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -1132,6 +1140,82 @@ async function runTests() {
   assert(modalContent.includes('const [isRedrawingGeometry, setIsRedrawingGeometry] = useState'), 'ZoneCreationModal.tsx declara el estado isRedrawingGeometry');
   assert(modalContent.includes('Redibujar Perímetro'), 'ZoneCreationModal.tsx incluye el botón Redibujar Perímetro');
   assert(modalContent.includes('if (isRedrawingGeometry && activeGeometry)'), 'ZoneCreationModal.tsx incluye geojson_geometry en PATCH solo al redibujar');
+
+  // ----------------------------------------------------------------------------
+  // 17. Contrato HERE Geocoding v7, Colores Canónicos y Smoke Tests de ZoneMiniMap
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 17. Contrato HERE Geocoding v7, Colores Canónicos y Smoke Tests de ZoneMiniMap ---');
+
+  // 1. Colores canónicos centralizados (Mandato Claude / Corrección 2)
+  assert(getSeverityColor('RED', 'THREAT', 'hex') === '#e07a6a', 'getSeverityColor devuelve #e07a6a para RED THREAT (hex)');
+  assert(getSeverityColor('AMBER', 'THREAT', 'hex') === '#d8a84f', 'getSeverityColor devuelve #d8a84f para AMBER THREAT (hex)');
+  assert(getSeverityColor('SAFE_HAVEN', 'THREAT', 'hex') === '#63b598', 'getSeverityColor devuelve #63b598 para SAFE_HAVEN THREAT (hex)');
+  assert(getSeverityColor('CORRIDOR', 'THREAT', 'hex') === '#94bce3', 'getSeverityColor devuelve #94bce3 para CORRIDOR THREAT (hex)');
+  assert(getSeverityColor('OPERATIONAL', 'RESPONSIBILITY', 'hex') === '#5980a6', 'getSeverityColor devuelve #5980a6 para RESPONSIBILITY (hex)');
+  assert(getSeverityColor('RED', 'RESPONSIBILITY', 'hex') === '#5980a6', 'getSeverityColor fuerza #5980a6 para cualquier severidad en RESPONSIBILITY');
+  assert(getSeverityColor('RED', 'THREAT', 'css') === 'var(--risk-crit)', 'getSeverityColor devuelve variable CSS var(--risk-crit) para RED');
+  assert(getSeverityColor('OPERATIONAL', 'RESPONSIBILITY', 'css') === 'var(--color-accent)', 'getSeverityColor devuelve var(--color-accent) para RESPONSIBILITY (css)');
+
+  // 2. Expresión MapLibre generada
+  const matchExpr = buildSeverityMatchExpression();
+  assert(Array.isArray(matchExpr) && matchExpr[0] === 'match', 'buildSeverityMatchExpression genera array match de MapLibre');
+  assert(matchExpr[3] === '#5980a6', 'buildSeverityMatchExpression asigna #5980a6 a RESPONSIBILITY');
+
+  // 3. Contrato de construcción de URL y parseo HERE Geocoding v7
+  const sampleUrl = buildHereGeocodeUrl('Bamako, Malí', 'TEST_KEY_123');
+  assert(sampleUrl.includes('geocode.search.hereapi.com/v1/geocode'), 'buildHereGeocodeUrl apunta al endpoint v7 de HERE');
+  assert(sampleUrl.includes('apiKey=TEST_KEY_123'), 'buildHereGeocodeUrl codifica el apiKey');
+  assert(sampleUrl.includes('q=Bamako%2C%20Mal%C3%AD'), 'buildHereGeocodeUrl codifica la query con URI encoding');
+
+  assert(parseHereGeocodeResponse(null).length === 0, 'parseHereGeocodeResponse tolera null');
+  assert(parseHereGeocodeResponse({}).length === 0, 'parseHereGeocodeResponse tolera objeto sin items');
+  assert(parseHereGeocodeResponse({ items: [] }).length === 0, 'parseHereGeocodeResponse tolera items vacío');
+
+  const validHerePayload = {
+    items: [
+      {
+        title: 'Bamako, Mali',
+        resultType: 'locality',
+        position: { lat: 12.63923, lng: -8.00289 },
+        mapView: { west: -8.1132, south: 12.5511, east: -7.8925, north: 12.7273 },
+      },
+    ],
+  };
+  const parsedItems = parseHereGeocodeResponse(validHerePayload);
+  assert(parsedItems.length === 1, 'parseHereGeocodeResponse extrae exactamente 1 resultado válido');
+  assert(parsedItems[0].title === 'Bamako, Mali', 'parseHereGeocodeResponse preserva el título del lugar');
+  assert(parsedItems[0].lat === 12.63923 && parsedItems[0].lng === -8.00289, 'parseHereGeocodeResponse preserva coordenadas numéricas WGS84');
+  assert(Array.isArray(parsedItems[0].bbox) && parsedItems[0].bbox.length === 4, 'parseHereGeocodeResponse extrae mapView como bbox');
+
+  // 4. Filtrado de coordenadas inválidas o fuera de rango WGS84 en el parser
+  const invalidHerePayload = {
+    items: [
+      { title: 'Lugar Inválido', position: { lat: 999, lng: 0 } },
+      { title: 'Lugar NaN', position: { lat: NaN, lng: 0 } },
+    ],
+  };
+  assert(parseHereGeocodeResponse(invalidHerePayload).length === 0, 'parseHereGeocodeResponse descarta coordenadas fuera de rango o NaN');
+
+  // 5. Smoke tests estáticos de arquitectura en ZoneMiniMap.tsx (Mandato Claude / Corrección 1)
+  const miniMapPath = path.resolve(process.cwd(), 'src/components/tactical/ZoneMiniMap.tsx');
+  assert(fs.existsSync(miniMapPath), 'src/components/tactical/ZoneMiniMap.tsx existe');
+  const miniMapContent = fs.readFileSync(miniMapPath, 'utf8');
+  assert(miniMapContent.includes("import maplibregl from 'maplibre-gl'"), 'ZoneMiniMap.tsx importa maplibre-gl');
+  assert(miniMapContent.includes('const [isMapLoaded, setIsMapLoaded] = useState'), 'ZoneMiniMap.tsx declara el estado reactivo isMapLoaded');
+  assert(miniMapContent.includes('setIsMapLoaded(true);'), 'ZoneMiniMap.tsx activa isMapLoaded en el evento load de MapLibre');
+  assert(miniMapContent.includes('setIsMapLoaded(false);'), 'ZoneMiniMap.tsx restablece isMapLoaded en el desmontaje');
+  assert(miniMapContent.includes('if (!map || !isMapLoaded) return;'), 'ZoneMiniMap.tsx gatea la actualización de fuentes y capas GeoJSON tras isMapLoaded');
+  assert(miniMapContent.includes('getSeverityColor(severity, zoneType'), 'ZoneMiniMap.tsx utiliza la función canónica getSeverityColor');
+  assert(miniMapContent.includes('results[0]'), 'ZoneMiniMap.tsx implementa selección consciente del primer resultado de geocoding');
+
+  // 6. Smoke tests en ZoneCreationModal.tsx y TerrenoScreen.tsx (Mandato Claude / Corrección 2)
+  const updatedModalContent = fs.readFileSync(modalPath, 'utf8');
+  assert(updatedModalContent.includes("import { ZoneMiniMap } from './ZoneMiniMap'"), 'ZoneCreationModal.tsx importa ZoneMiniMap');
+  assert(updatedModalContent.includes('<ZoneMiniMap'), 'ZoneCreationModal.tsx renderiza el componente ZoneMiniMap');
+
+  const updatedTerrenoContent = fs.readFileSync(terrenoPath, 'utf8');
+  assert(updatedTerrenoContent.includes('getSeverityColor(sev, zType, \'css\')'), 'TerrenoScreen.tsx sustituye el primer mapeo duplicado con getSeverityColor');
+  assert(updatedTerrenoContent.includes('buildSeverityMatchExpression()'), 'TerrenoScreen.tsx sustituye el segundo mapeo duplicado con buildSeverityMatchExpression');
 
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);
