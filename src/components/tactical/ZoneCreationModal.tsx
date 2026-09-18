@@ -24,6 +24,10 @@ import {
   closeDrawnPolygon,
   calculateRingAreaKm2,
   ExtractedCountryGeometry,
+  calculatePolygonCentroid,
+  calculateGeodesicDistanceKm,
+  inferZoneConfiguration,
+  InferredZoneConfig,
 } from '@/lib/geo/tactical-zones';
 import { ZoneMiniMap } from './ZoneMiniMap';
 import { validateGeoJSONPolygon } from '@/lib/geo/validation';
@@ -76,11 +80,13 @@ const SEVERITY_CONFIG: Record<
   },
 };
 
+export const DEFAULT_ZONE_CENTER: [number, number] = [-3.7038, 40.4168];
+
 export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
   isOpen,
   onClose,
   onZoneCreated,
-  initialCenter = [-3.7038, 40.4168],
+  initialCenter = DEFAULT_ZONE_CENTER,
   initialZone = null,
 }) => {
   const isEditMode = Boolean(initialZone);
@@ -160,6 +166,73 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
     }
   }, [worldTopology, isOpen]);
 
+  // Seleccionar país y extraer su polígono continental principal
+  const handleSelectCountry = useCallback(
+    (cId: string, cName: string, shouldUpdateName: boolean = true) => {
+      setSelectedCountryId(cId);
+      setSelectedCountryName(cName);
+      if (shouldUpdateName) {
+        setName((prev) => {
+          if (!prev || prev.startsWith('Teatro Operativo -') || prev.startsWith('Área Táctica -')) {
+            return zoneType === 'RESPONSIBILITY' ? `Teatro Operativo - ${cName}` : `Área Táctica - ${cName}`;
+          }
+          return prev;
+        });
+      }
+
+      if (!worldTopology) return;
+      try {
+        const geom = worldTopology.objects?.countries?.geometries?.find(
+          (g: any) => String(g.id) === cId
+        );
+        if (!geom) return;
+
+        const feature: any = topojson.feature(worldTopology, geom);
+        if (feature && feature.geometry) {
+          const extraction = extractMainContinentPolygon(feature.geometry);
+          setCountryExtraction(extraction);
+        }
+      } catch (err: any) {
+        console.error('Fallo al extraer geometría de país:', err);
+        setCountryExtraction(null);
+      }
+    },
+    [zoneType, worldTopology]
+  );
+
+  // Resolver país en TopoJSON a partir del nombre inferido
+  const resolveInferredCountry = useCallback(
+    (countryName: string) => {
+      if (!worldTopology || !worldTopology.objects?.countries?.geometries) return;
+      const geoms: any[] = worldTopology.objects.countries.geometries;
+      const query = countryName.trim().toLowerCase();
+      const match =
+        geoms.find((g: any) => (g.properties?.name || '').toLowerCase() === query) ||
+        geoms.find((g: any) => (g.properties?.name || '').toLowerCase().includes(query));
+      if (match) {
+        handleSelectCountry(String(match.id), match.properties?.name || countryName, false);
+      }
+    },
+    [worldTopology, handleSelectCountry]
+  );
+
+  // Aplicar inferencia geométrica canónica a partir de la zona inicial
+  const applyInferredConfiguration = useCallback(
+    (zone: any) => {
+      if (!zone || !zone.geometry) return;
+      const inferred = inferZoneConfiguration(zone.geometry, zone.properties?.name, initialCenter);
+      setMode(inferred.mode);
+      setCenterLng(inferred.centerLng);
+      setCenterLat(inferred.centerLat);
+      setRadiusKm(inferred.radiusKm);
+      setRawCoordinatesText(inferred.rawCoordinatesText);
+      if (inferred.countryName) {
+        setCountrySearch(inferred.countryName);
+      }
+    },
+    [initialCenter]
+  );
+
   // Sincronizar estado inicial al abrir o cambiar de zona
   useEffect(() => {
     if (isOpen) {
@@ -182,12 +255,8 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
         setGateAccessProtocol(p.gate_access_protocol || '');
         setValidUntil(p.valid_until ? p.valid_until.slice(0, 16) : '');
 
-        // Si la zona tiene un polígono, sugerir su primer vértice como centro para el modo radio
-        if (initialZone.geometry?.coordinates?.[0]?.[0]) {
-          const pt = initialZone.geometry.coordinates[0][0];
-          setCenterLng(Number(pt[0].toFixed(4)));
-          setCenterLat(Number(pt[1].toFixed(4)));
-        }
+        // Inferencia determinística de modalidad, centro real y radio (cero deriva al norte)
+        applyInferredConfiguration(initialZone);
       } else {
         setName('');
         setDescription('');
@@ -205,9 +274,26 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
         setSelectedCountryId('');
         setSelectedCountryName('');
         setCountryExtraction(null);
+        setMode('country');
+        setCenterLng(initialCenter[0]);
+        setCenterLat(initialCenter[1]);
+        setRadiusKm(15);
+        setRawCoordinatesText(
+          '-3.7100, 40.4200\n-3.6900, 40.4200\n-3.6900, 40.4100\n-3.7100, 40.4100'
+        );
       }
     }
-  }, [isOpen, initialZone]);
+  }, [isOpen, initialZone, initialCenter, applyInferredConfiguration]);
+
+  // Sincronizar resolución asíncrona de país TopoJSON cuando se cargue el dataset (Precisión Claude)
+  useEffect(() => {
+    if (worldTopology && isOpen && isEditMode && initialZone) {
+      const inferred = inferZoneConfiguration(initialZone.geometry, initialZone.properties?.name, initialCenter);
+      if (inferred.mode === 'country' && inferred.countryName) {
+        resolveInferredCountry(inferred.countryName);
+      }
+    }
+  }, [worldTopology, isOpen, isEditMode, initialZone, initialCenter, resolveInferredCountry]);
 
   // Lista filtrada de países disponibles
   const countryList = useMemo(() => {
@@ -224,32 +310,6 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
     const query = countrySearch.toLowerCase();
     return items.filter((item) => item.name.toLowerCase().includes(query));
   }, [worldTopology, countrySearch]);
-
-  // Seleccionar país y extraer su polígono continental principal
-  const handleSelectCountry = (cId: string, cName: string) => {
-    setSelectedCountryId(cId);
-    setSelectedCountryName(cName);
-    if (!name || name.startsWith('Teatro Operativo -') || name.startsWith('Área Táctica -')) {
-      setName(zoneType === 'RESPONSIBILITY' ? `Teatro Operativo - ${cName}` : `Área Táctica - ${cName}`);
-    }
-
-    if (!worldTopology) return;
-    try {
-      const geom = worldTopology.objects.countries.geometries.find(
-        (g: any) => String(g.id) === cId
-      );
-      if (!geom) return;
-
-      const feature: any = topojson.feature(worldTopology, geom);
-      if (feature && feature.geometry) {
-        const extraction = extractMainContinentPolygon(feature.geometry);
-        setCountryExtraction(extraction);
-      }
-    } catch (err: any) {
-      console.error('Fallo al extraer geometría de país:', err);
-      setCountryExtraction(null);
-    }
-  };
 
   // Geometría activa calculada según modalidad
   const activeGeometry = useMemo<GeoJSON.Polygon | null>(() => {
@@ -676,11 +736,7 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
                     type="button"
                     onClick={() => {
                       setIsRedrawingGeometry(true);
-                      if (initialZone?.geometry?.coordinates?.[0]?.[0]) {
-                        const pt = initialZone.geometry.coordinates[0][0];
-                        setCenterLng(Number(pt[0].toFixed(4)));
-                        setCenterLat(Number(pt[1].toFixed(4)));
-                      }
+                      applyInferredConfiguration(initialZone);
                     }}
                     className="px-3.5 py-1.5 border border-[var(--color-accent)] text-[var(--color-accent)] text-xs font-heading font-semibold uppercase tracking-wider hover:bg-[var(--color-accent)]/15 transition-colors flex items-center gap-1.5 shrink-0"
                   >

@@ -27,6 +27,10 @@ import {
   buildSeverityMatchExpression,
   SEVERITY_HEX_COLORS,
   SEVERITY_CSS_COLORS,
+  EARTH_RADIUS_KM,
+  calculatePolygonCentroid,
+  calculateGeodesicDistanceKm,
+  inferZoneConfiguration,
 } from '../src/lib/geo/tactical-zones';
 import {
   buildHereGeocodeUrl,
@@ -1218,6 +1222,123 @@ async function runTests() {
   const updatedTerrenoContent = fs.readFileSync(terrenoPath, 'utf8');
   assert(updatedTerrenoContent.includes('getSeverityColor(sev, zType, \'css\')'), 'TerrenoScreen.tsx sustituye el primer mapeo duplicado con getSeverityColor');
   assert(updatedTerrenoContent.includes('buildSeverityMatchExpression()'), 'TerrenoScreen.tsx sustituye el segundo mapeo duplicado con buildSeverityMatchExpression');
+
+  // ----------------------------------------------------------------------------
+  // 18. Persistencia e Inferencia de Configuración Geométrica en Edición (Mandato Daniel / Claude)
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 18. Persistencia e Inferencia de Configuración Geométrica en Edición (Mandato Daniel / Claude) ---');
+
+  // 1. Constante única EARTH_RADIUS_KM
+  assert(EARTH_RADIUS_KM === 6371.0088, 'EARTH_RADIUS_KM exportada con valor volumétrico WGS84 canónico (6371.0088)');
+
+  // 2. Cálculo canónico de centroide de polígono (calculatePolygonCentroid)
+  const squarePolygon = [
+    [-3.71, 40.42],
+    [-3.69, 40.42],
+    [-3.69, 40.40],
+    [-3.71, 40.40],
+    [-3.71, 40.42], // Punto de cierre idéntico al primero
+  ];
+  const squareCentroid = calculatePolygonCentroid(squarePolygon);
+  assert(
+    Math.abs(squareCentroid[0] - (-3.70)) < 0.0001 && Math.abs(squareCentroid[1] - 40.41) < 0.0001,
+    'calculatePolygonCentroid calcula el centroide exacto de un polígono cuadrado excluyendo el cierre'
+  );
+
+  // 3. Resolución de causa raíz del desplazamiento hacia el norte en círculos geodésicos
+  const bamakoOriginalCenter: [number, number] = [-8.0029, 12.6392];
+  const bamakoCircleGeoJson = generateGeodesicCircle(bamakoOriginalCenter[0], bamakoOriginalCenter[1], 15, 64);
+  const bamakoRing = bamakoCircleGeoJson.coordinates[0];
+  const bamakoCentroid = calculatePolygonCentroid(bamakoRing);
+
+  assert(
+    Math.abs(bamakoCentroid[0] - bamakoOriginalCenter[0]) < 0.0001 &&
+    Math.abs(bamakoCentroid[1] - bamakoOriginalCenter[1]) < 0.0001,
+    'calculatePolygonCentroid recupera el centro original de Bamako con desviación inferior a 0.0001°'
+  );
+
+  // Demostrar el bug previo: coordinates[0][0] estaba a 15 km al norte del centro real
+  const buggedNorthPoint = bamakoRing[0];
+  const northDriftKm = calculateGeodesicDistanceKm(
+    bamakoOriginalCenter[0],
+    bamakoOriginalCenter[1],
+    buggedNorthPoint[0],
+    buggedNorthPoint[1]
+  );
+  assert(
+    Math.round(northDriftKm) === 15,
+    'El vértice coordinates[0][0] dista exactamente 15 km al norte del centro (demostración de la causa raíz)'
+  );
+
+  // 4. Distancia geodésica ortodrómica (calculateGeodesicDistanceKm)
+  const distMadridBcn = calculateGeodesicDistanceKm(-3.7038, 40.4168, 2.1734, 41.3851);
+  assert(distMadridBcn > 500 && distMadridBcn < 510, 'calculateGeodesicDistanceKm calcula la distancia Madrid-Barcelona (~504 km)');
+
+  // 5. Inferencia determinística de modalidad circular (Caso Bamako)
+  const inferredBamako = inferZoneConfiguration(bamakoCircleGeoJson, 'Área Táctica - Bamako');
+  assert(inferredBamako.mode === 'radius', 'inferZoneConfiguration clasifica círculo de 64 vértices como modo radius');
+  assert(inferredBamako.centerLng === -8.0029, 'inferZoneConfiguration recupera longitud real de Bamako (-8.0029)');
+  assert(inferredBamako.centerLat === 12.6392, 'inferZoneConfiguration recupera latitud real de Bamako (12.6392)');
+  assert(inferredBamako.radiusKm === 15, 'inferZoneConfiguration recupera radio exacto de 15 km');
+
+  // 6. Inferencia determinística de modalidad país con prefijo canónico
+  const irregularCountryPoly: GeoJSON.Polygon = {
+    type: 'Polygon',
+    coordinates: [[
+      [-4.0, 12.0],
+      [-3.0, 12.0],
+      [-3.0, 14.0],
+      [-4.0, 14.0],
+      [-4.5, 13.0],
+      [-4.0, 12.0],
+    ]],
+  };
+  const inferredCountry = inferZoneConfiguration(irregularCountryPoly, 'Teatro Operativo - Malí');
+  assert(inferredCountry.mode === 'country', 'inferZoneConfiguration detecta modo country a partir de prefijo de nombre');
+  assert(inferredCountry.countryName === 'Malí', 'inferZoneConfiguration extrae el nombre del país (Malí)');
+
+  // 7. Fallback determinístico a Polígono Libre (freehand)
+  const irregularFreehandPoly: GeoJSON.Polygon = {
+    type: 'Polygon',
+    coordinates: [[
+      [-3.71, 40.42],
+      [-3.69, 40.42],
+      [-3.69, 40.41],
+      [-3.71, 40.41],
+      [-3.71, 40.42],
+    ]],
+  };
+  const inferredFreehand = inferZoneConfiguration(irregularFreehandPoly, 'Zona Alfa Sin Prefijo');
+  assert(inferredFreehand.mode === 'freehand', 'inferZoneConfiguration cae en modo freehand para polígonos no circulares sin prefijo país');
+  assert(inferredFreehand.rawCoordinatesText.includes('-3.7100, 40.4200'), 'inferZoneConfiguration genera texto de coordenadas para freehand');
+
+  // 8. Fallback seguro ante geometría nula
+  const inferredNull = inferZoneConfiguration(null);
+  assert(inferredNull.mode === 'country' && inferredNull.radiusKm === 15, 'inferZoneConfiguration proporciona fallback seguro ante geometría nula');
+
+  // 9. Smoke tests estáticos de arquitectura y eliminación del bug de centroide
+  const zonesLibPath = path.resolve(process.cwd(), 'src/lib/geo/tactical-zones.ts');
+  const zonesLibContent = fs.readFileSync(zonesLibPath, 'utf8');
+  assert(zonesLibContent.includes('export const EARTH_RADIUS_KM = 6371.0088;'), 'tactical-zones.ts exporta EARTH_RADIUS_KM (Precisión Claude 3)');
+  assert(zonesLibContent.includes('radiusKm / EARTH_RADIUS_KM'), 'generateGeodesicCircle utiliza EARTH_RADIUS_KM');
+  assert(zonesLibContent.includes('EARTH_RADIUS_KM * EARTH_RADIUS_KM'), 'calculateRingAreaKm2 utiliza EARTH_RADIUS_KM');
+  assert(zonesLibContent.includes('export function calculatePolygonCentroid'), 'tactical-zones.ts exporta calculatePolygonCentroid');
+  assert(zonesLibContent.includes('export function calculateGeodesicDistanceKm'), 'tactical-zones.ts exporta calculateGeodesicDistanceKm');
+  assert(zonesLibContent.includes('export function inferZoneConfiguration'), 'tactical-zones.ts exporta inferZoneConfiguration');
+
+  const terrenoSrcContent = fs.readFileSync(terrenoPath, 'utf8');
+  assert(terrenoSrcContent.includes('calculatePolygonCentroid(f.geometry.coordinates[0])'), 'TerrenoScreen.tsx invoca calculatePolygonCentroid');
+  assert(!terrenoSrcContent.includes('sumLng / count'), 'TerrenoScreen.tsx no contiene cálculo manual inline de centroide');
+
+  const modalSrcContent = fs.readFileSync(modalPath, 'utf8');
+  assert(modalSrcContent.includes('inferZoneConfiguration'), 'ZoneCreationModal.tsx importa inferZoneConfiguration');
+  assert(modalSrcContent.includes('applyInferredConfiguration(initialZone);'), 'ZoneCreationModal.tsx invoca applyInferredConfiguration');
+  assert(!modalSrcContent.includes('const pt = initialZone.geometry.coordinates[0][0];'), 'ZoneCreationModal.tsx no asigna coordinates[0][0] como centro');
+  assert(modalSrcContent.includes('resolveInferredCountry'), 'ZoneCreationModal.tsx implementa resolución asíncrona de país TopoJSON (Precisión Claude 2)');
+  assert(modalSrcContent.includes('export const DEFAULT_ZONE_CENTER'), 'ZoneCreationModal.tsx define constante de módulo DEFAULT_ZONE_CENTER (Corrección Claude)');
+  assert(!modalSrcContent.includes('initialCenter = [-3.7038, 40.4168]'), 'ZoneCreationModal.tsx no usa array literal inestable como default de prop');
+  assert(!modalSrcContent.includes('[initialCenter, resolveInferredCountry]'), 'applyInferredConfiguration no incluye resolveInferredCountry en sus dependencias');
+  assert(Boolean(modalSrcContent.match(/\[initialCenter\]\s*\);/)), 'applyInferredConfiguration depende exclusivamente de initialCenter');
 
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);

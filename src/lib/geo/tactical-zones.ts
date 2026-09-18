@@ -77,6 +77,12 @@ export function buildSeverityMatchExpression(): any {
   ];
 }
 
+// -----------------------------------------------------------------------------
+// CONSTANTES GEODÉSICAS WGS84
+// -----------------------------------------------------------------------------
+
+export const EARTH_RADIUS_KM = 6371.0088; // Radio medio volumétrico WGS84
+
 /**
  * Genera un polígono geodésico regular aproximando un círculo sobre WGS84.
  *
@@ -93,11 +99,10 @@ export function generateGeodesicCircle(
   numPoints: number = 64
 ): GeoJSON.Polygon {
   const coordinates: [number, number][] = [];
-  const earthRadiusKm = 6371.0088; // Radio medio WGS84
 
   const latRad = (centerLat * Math.PI) / 180;
   const lngRad = (centerLng * Math.PI) / 180;
-  const angularDist = radiusKm / earthRadiusKm;
+  const angularDist = radiusKm / EARTH_RADIUS_KM;
 
   for (let i = 0; i < numPoints; i++) {
     const bearing = (i * 2 * Math.PI) / numPoints;
@@ -140,7 +145,6 @@ export function generateGeodesicCircle(
 export function calculateRingAreaKm2(ring: number[][]): number {
   if (ring.length < 3) return 0;
 
-  const R = 6371.0088;
   let total = 0;
 
   for (let i = 0; i < ring.length - 1; i++) {
@@ -155,7 +159,7 @@ export function calculateRingAreaKm2(ring: number[][]): number {
     total += (lambda2 - lambda1) * (2 + Math.sin(phi1) + Math.sin(phi2));
   }
 
-  const area = Math.abs((total * R * R) / 2);
+  const area = Math.abs((total * EARTH_RADIUS_KM * EARTH_RADIUS_KM) / 2);
   return Number(area.toFixed(2));
 }
 
@@ -227,5 +231,161 @@ export function closeDrawnPolygon(points: [number, number][]): GeoJSON.Polygon |
   return {
     type: 'Polygon',
     coordinates: [closed],
+  };
+}
+
+// -----------------------------------------------------------------------------
+// INTROSPECCIÓN, CENTROIDES E INFERENCIA GEOMÉTRICA CANÓNICA
+// -----------------------------------------------------------------------------
+
+/**
+ * Calcula el centroide geométrico promedio de un anillo de coordenadas poligonales (WGS84).
+ * Si el anillo está cerrado (último vértice idéntico al primero), excluye el punto duplicado.
+ */
+export function calculatePolygonCentroid(coordinates: number[][]): [number, number] {
+  if (!coordinates || coordinates.length === 0) return [0, 0];
+
+  const count = coordinates.length;
+  const isClosed =
+    count > 1 &&
+    coordinates[0][0] === coordinates[count - 1][0] &&
+    coordinates[0][1] === coordinates[count - 1][1];
+
+  const verticesCount = isClosed ? count - 1 : count;
+  if (verticesCount === 0) {
+    return [Number(coordinates[0][0].toFixed(6)), Number(coordinates[0][1].toFixed(6))];
+  }
+
+  let sumLng = 0;
+  let sumLat = 0;
+  for (let i = 0; i < verticesCount; i++) {
+    sumLng += coordinates[i][0];
+    sumLat += coordinates[i][1];
+  }
+
+  return [
+    Number((sumLng / verticesCount).toFixed(6)),
+    Number((sumLat / verticesCount).toFixed(6)),
+  ];
+}
+
+/**
+ * Calcula la distancia geodésica ortodrómica (Haversine) entre dos puntos en kilómetros.
+ */
+export function calculateGeodesicDistanceKm(
+  lng1: number,
+  lat1: number,
+  lng2: number,
+  lat2: number
+): number {
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+
+  const lat1Rad = (lat1 * Math.PI) / 180;
+  const lat2Rad = (lat2 * Math.PI) / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return EARTH_RADIUS_KM * c;
+}
+
+export interface InferredZoneConfig {
+  mode: 'country' | 'radius' | 'freehand';
+  centerLng: number;
+  centerLat: number;
+  radiusKm: number;
+  countryName?: string;
+  rawCoordinatesText: string;
+}
+
+/**
+ * Reconstruye determinísticamente la modalidad y parámetros de delimitación
+ * de una zona a partir de su geometría y nombre almacenados.
+ *
+ * Evita la deriva del centro hacia el norte y recupera el modo y radio originales.
+ */
+export function inferZoneConfiguration(
+  geometry: GeoJSON.Polygon | null | undefined,
+  zoneName?: string,
+  fallbackCenter: [number, number] = [-3.7038, 40.4168]
+): InferredZoneConfig {
+  if (!geometry || geometry.type !== 'Polygon' || !geometry.coordinates?.[0]?.length) {
+    return {
+      mode: 'country',
+      centerLng: fallbackCenter[0],
+      centerLat: fallbackCenter[1],
+      radiusKm: 15,
+      countryName: undefined,
+      rawCoordinatesText: '-3.7100, 40.4200\n-3.6900, 40.4200\n-3.6900, 40.4100\n-3.7100, 40.4100',
+    };
+  }
+
+  const ring = geometry.coordinates[0];
+  const centroid = calculatePolygonCentroid(ring);
+  const count = ring.length;
+
+  // 1. Detección de círculo geodésico (64 segmentos generados por GZN -> 65 coordenadas con cierre)
+  if (count === 65 || count === 64) {
+    const d0 = calculateGeodesicDistanceKm(centroid[0], centroid[1], ring[0][0], ring[0][1]);
+    const d16 = calculateGeodesicDistanceKm(centroid[0], centroid[1], ring[16][0], ring[16][1]);
+    const d32 = calculateGeodesicDistanceKm(centroid[0], centroid[1], ring[32][0], ring[32][1]);
+    const d48 = calculateGeodesicDistanceKm(centroid[0], centroid[1], ring[48][0], ring[48][1]);
+    const avgDist = (d0 + d16 + d32 + d48) / 4;
+
+    if (
+      avgDist > 0.01 &&
+      Math.abs(d0 - avgDist) / avgDist < 0.08 &&
+      Math.abs(d16 - avgDist) / avgDist < 0.08 &&
+      Math.abs(d32 - avgDist) / avgDist < 0.08 &&
+      Math.abs(d48 - avgDist) / avgDist < 0.08
+    ) {
+      return {
+        mode: 'radius',
+        centerLng: Number(centroid[0].toFixed(4)),
+        centerLat: Number(centroid[1].toFixed(4)),
+        radiusKm: Math.round(avgDist),
+        countryName: undefined,
+        rawCoordinatesText: ring
+          .slice(0, count === 65 ? 64 : count)
+          .map((p) => `${p[0].toFixed(4)}, ${p[1].toFixed(4)}`)
+          .join('\n'),
+      };
+    }
+  }
+
+  // 2. Detección de modo País si coincide con el patrón canónico de denominación
+  const countryMatch = zoneName?.match(/^(?:Teatro Operativo|Área Táctica)\s*[-–—:]\s*(.+)$/i);
+  if (countryMatch && countryMatch[1]?.trim()) {
+    const country = countryMatch[1].trim();
+    return {
+      mode: 'country',
+      centerLng: Number(centroid[0].toFixed(4)),
+      centerLat: Number(centroid[1].toFixed(4)),
+      radiusKm: 15,
+      countryName: country,
+      rawCoordinatesText: ring
+        .slice(0, ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] ? ring.length - 1 : ring.length)
+        .map((p) => `${p[0].toFixed(4)}, ${p[1].toFixed(4)}`)
+        .join('\n'),
+    };
+  }
+
+  // 3. Fallback: Polígono Libre (Freehand)
+  const isClosed = count > 1 && ring[0][0] === ring[count - 1][0] && ring[0][1] === ring[count - 1][1];
+  const uniquePoints = isClosed ? ring.slice(0, count - 1) : ring;
+  const rawCoords = uniquePoints
+    .map((p) => `${p[0].toFixed(4)}, ${p[1].toFixed(4)}`)
+    .join('\n');
+
+  return {
+    mode: 'freehand',
+    centerLng: Number(centroid[0].toFixed(4)),
+    centerLat: Number(centroid[1].toFixed(4)),
+    radiusKm: 15,
+    countryName: undefined,
+    rawCoordinatesText: rawCoords,
   };
 }

@@ -17,7 +17,11 @@ import {
   setHereActiveLayer,
   type HereMapStyleId,
 } from '@/lib/geo/hereMapStyles';
-import { getSeverityColor, buildSeverityMatchExpression } from '@/lib/geo/tactical-zones';
+import {
+  getSeverityColor,
+  buildSeverityMatchExpression,
+  calculatePolygonCentroid,
+} from '@/lib/geo/tactical-zones';
 import { TacticalLayerSelector } from '@/components/map/TacticalLayerSelector';
 import { TacticalHud } from '@/components/map/TacticalHud';
 import { BlueprintPlate } from '@/components/industry/BlueprintPlate';
@@ -150,15 +154,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
         const mapped: ZoneItem[] = (data.features || []).map((f: any) => {
           let center: [number, number] | undefined = undefined;
           if (f.geometry?.type === 'Polygon' && f.geometry.coordinates?.[0]?.length > 0) {
-            const ring = f.geometry.coordinates[0];
-            let sumLng = 0;
-            let sumLat = 0;
-            for (let i = 0; i < ring.length - 1; i++) {
-              sumLng += ring[i][0];
-              sumLat += ring[i][1];
-            }
-            const count = ring.length - 1;
-            center = [Number((sumLng / count).toFixed(6)), Number((sumLat / count).toFixed(6))];
+            center = calculatePolygonCentroid(f.geometry.coordinates[0]);
           }
 
           const zType = (f.properties?.zone_type || 'THREAT') as 'RESPONSIBILITY' | 'THREAT';
