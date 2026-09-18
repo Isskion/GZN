@@ -17,14 +17,17 @@ import {
   Clock,
   Radio,
   UserCheck,
+  Crosshair,
 } from 'lucide-react';
 import { BlueprintPlate } from '@/components/industry/BlueprintPlate';
+import { ZoneSideInspectionMap } from '@/components/tactical/ZoneSideInspectionMap';
 import { ZoneType, ZoneSeverity } from '@/types/database';
 
 interface ZonasScreenProps {
   canManageZones?: boolean;
   onOpenCreateZone?: () => void;
   onEditZone?: (zone: any) => void;
+  onNavigateTerreno?: (zoneId: string) => void;
   refreshTrigger?: number;
 }
 
@@ -32,12 +35,16 @@ export const ZonasScreen: React.FC<ZonasScreenProps> = ({
   canManageZones = false,
   onOpenCreateZone,
   onEditZone,
+  onNavigateTerreno,
   refreshTrigger = 0,
 }) => {
   const [zones, setZones] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  // Estado para inspección en mapa lateral (zoom 500m)
+  const [inspectingZone, setInspectingZone] = useState<any | null>(null);
 
   // Filtros
   const [searchQuery, setSearchQuery] = useState('');
@@ -159,6 +166,9 @@ export const ZonasScreen: React.FC<ZonasScreenProps> = ({
       }
 
       setActionSuccess(`Zona "${deletingZone.properties?.name}" eliminada permanentemente.`);
+      if (inspectingZone && (inspectingZone.id === zoneId || inspectingZone.properties?.id === zoneId)) {
+        setInspectingZone(null);
+      }
       setDeletingZone(null);
       fetchZones();
     } catch (err: any) {
@@ -279,181 +289,228 @@ export const ZonasScreen: React.FC<ZonasScreenProps> = ({
         </div>
       </BlueprintPlate>
 
-      {/* Tabla del Catálogo de Zonas */}
-      <BlueprintPlate variant="panel" className="flex-1 min-h-[300px] overflow-hidden flex flex-col p-0">
-        <div className="overflow-x-auto flex-1">
-          <table className="w-full text-left border-collapse font-mono text-xs">
-            <thead className="bg-[var(--color-surface)] border-b border-[var(--color-divider)] uppercase text-[10px] text-[var(--color-text-muted)] tracking-wider">
-              <tr>
-                <th className="py-2.5 px-3">Área / Directiva</th>
-                <th className="py-2.5 px-3">Tipología</th>
-                <th className="py-2.5 px-3">Severidad</th>
-                <th className="py-2.5 px-3">Oficial RSO</th>
-                <th className="py-2.5 px-3">Restricciones</th>
-                <th className="py-2.5 px-3">Estado</th>
-                <th className="py-2.5 px-3 text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--color-divider)]">
-              {isLoading ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-xs opacity-60">
-                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-[var(--color-accent)]" />
-                    Cargando catálogo de zonas desde PostGIS...
-                  </td>
-                </tr>
-              ) : filteredZones.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-xs opacity-60">
-                    {zones.length === 0 ? (
-                      <div>
-                        <Layers className="w-6 h-6 mx-auto mb-1 opacity-40" />
-                        <span className="block font-heading font-semibold uppercase">No hay áreas registradas</span>
-                        <span className="text-[11px] block mt-1">Crea tu primer teatro de control con el botón superior.</span>
-                      </div>
-                    ) : (
-                      'No se encontraron zonas que coincidan con los filtros seleccionados.'
-                    )}
-                  </td>
-                </tr>
-              ) : (
-                filteredZones.map((f: any) => {
-                  const p = f.properties || {};
-                  const isResp = p.zone_type === 'RESPONSIBILITY';
-                  const isActive = p.is_active !== false;
-
-                  return (
-                    <tr
-                      key={f.id || p.id}
-                      className="hover:bg-[color-mix(in_srgb,var(--color-text)_4%,transparent)] transition-colors"
-                    >
-                      {/* Nombre y Descripción */}
-                      <td className="py-2.5 px-3 max-w-[220px]">
-                        <div className="font-heading font-bold text-xs uppercase text-[var(--color-text)] truncate">
-                          {p.name || 'Sin nombre'}
-                        </div>
-                        {p.description && (
-                          <div className="text-[11px] text-[var(--color-text-muted)] truncate font-sans">
-                            {p.description}
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Tipología */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 border text-[10px] font-mono uppercase ${
-                            isResp
-                              ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent)]/10'
-                              : 'border-amber-500/80 text-amber-400 bg-amber-500/10'
-                          }`}
-                        >
-                          {isResp ? <Shield className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
-                          {isResp ? 'CONTROL' : 'PELIGRO'}
-                        </span>
-                      </td>
-
-                      {/* Severidad */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <span
-                          className="px-2 py-0.5 border text-[10px] uppercase font-bold"
-                          style={{
-                            borderColor: isResp ? 'var(--color-accent)' : p.color || '#98989b',
-                            color: isResp ? 'var(--color-accent)' : p.color || '#98989b',
-                          }}
-                        >
-                          {p.severity}
-                        </span>
-                      </td>
-
-                      {/* RSO Asignado */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        {p.assigned_rso_id ? (
-                          <span className="flex items-center gap-1 text-[11px] text-[var(--color-text)]">
-                            <UserCheck className="w-3.5 h-3.5 text-[var(--color-accent)]" />
-                            Asignado
-                          </span>
-                        ) : (
-                          <span className="text-[11px] opacity-40">--</span>
-                        )}
-                      </td>
-
-                      {/* Restricciones Tácticas */}
-                      <td className="py-2.5 px-3 text-[11px] whitespace-nowrap">
-                        {p.is_curfew ? (
-                          <span className="text-amber-400 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {p.curfew_start?.slice(0, 5)} - {p.curfew_end?.slice(0, 5)}
-                          </span>
-                        ) : p.buffer_meters > 0 ? (
-                          <span>Buffer: {p.buffer_meters}m</span>
-                        ) : (
-                          <span className="opacity-40">Estándar</span>
-                        )}
-                      </td>
-
-                      {/* Estado Activo / Inactivo */}
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <span
-                          className={`px-1.5 py-0.5 text-[9px] uppercase border ${
-                            isActive
-                              ? 'border-emerald-500/60 text-emerald-400 bg-emerald-500/10'
-                              : 'border-red-500/60 text-red-400 bg-red-500/10'
-                          }`}
-                        >
-                          {isActive ? 'ACTIVA' : 'INACTIVA'}
-                        </span>
-                      </td>
-
-                      {/* Acciones */}
-                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {canManageZones && onEditZone && (
-                            <button
-                              type="button"
-                              onClick={() => onEditZone(f)}
-                              title="Editar área táctica"
-                              className="p-1 border border-[var(--color-divider)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] text-[var(--color-text-muted)] transition-colors"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-
-                          {canManageZones && (
-                            <button
-                              type="button"
-                              onClick={() => handleToggleActive(f)}
-                              title={isActive ? 'Desactivar zona (Soft-delete)' : 'Activar zona'}
-                              className={`p-1 border transition-colors ${
-                                isActive
-                                  ? 'border-[var(--color-divider)] hover:border-amber-500 hover:text-amber-400 text-[var(--color-text-muted)]'
-                                  : 'border-[var(--color-divider)] hover:border-emerald-500 hover:text-emerald-400 text-[var(--color-text-muted)]'
-                              }`}
-                            >
-                              <Power className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-
-                          {canManageZones && (
-                            <button
-                              type="button"
-                              onClick={() => setDeletingZone(f)}
-                              title="Eliminar área permanentemente"
-                              className="p-1 border border-[var(--color-divider)] hover:border-red-500 hover:text-red-400 text-[var(--color-text-muted)] transition-colors"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
+      {/* Contenedor Principal: Tabla de Zonas y Panel Lateral de Mapa (Split-View) */}
+      <div className="flex-1 min-h-[300px] flex flex-col lg:flex-row gap-4 overflow-hidden">
+        {/* Tabla del Catálogo de Zonas (Empujada a la izquierda si el mapa lateral está activo) */}
+        <div
+          className={`flex flex-col min-h-0 overflow-hidden transition-all duration-300 ${
+            inspectingZone ? 'w-full lg:w-3/5 xl:w-2/3' : 'w-full'
+          }`}
+        >
+          <BlueprintPlate variant="panel" className="flex-1 min-h-[300px] overflow-hidden flex flex-col p-0">
+            <div className="overflow-x-auto flex-1">
+              <table className="w-full text-left border-collapse font-mono text-xs">
+                <thead className="bg-[var(--color-surface)] border-b border-[var(--color-divider)] uppercase text-[10px] text-[var(--color-text-muted)] tracking-wider">
+                  <tr>
+                    <th className="py-2.5 px-3">Área / Directiva</th>
+                    <th className="py-2.5 px-3">Tipología</th>
+                    <th className="py-2.5 px-3">Severidad</th>
+                    <th className="py-2.5 px-3">Oficial RSO</th>
+                    <th className="py-2.5 px-3">Restricciones</th>
+                    <th className="py-2.5 px-3">Estado</th>
+                    <th className="py-2.5 px-3 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--color-divider)]">
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-xs opacity-60">
+                        <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-[var(--color-accent)]" />
+                        Cargando catálogo de zonas desde PostGIS...
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  ) : filteredZones.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-xs opacity-60">
+                        {zones.length === 0 ? (
+                          <div>
+                            <Layers className="w-6 h-6 mx-auto mb-1 opacity-40" />
+                            <span className="block font-heading font-semibold uppercase">No hay áreas registradas</span>
+                            <span className="text-[11px] block mt-1">Crea tu primer teatro de control con el botón superior.</span>
+                          </div>
+                        ) : (
+                          'No se encontraron zonas que coincidan con los filtros seleccionados.'
+                        )}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredZones.map((f: any) => {
+                      const p = f.properties || {};
+                      const isResp = p.zone_type === 'RESPONSIBILITY';
+                      const isActive = p.is_active !== false;
+
+                      return (
+                        <tr
+                          key={f.id || p.id}
+                          className="hover:bg-[color-mix(in_srgb,var(--color-text)_4%,transparent)] transition-colors"
+                        >
+                          {/* Nombre y Descripción */}
+                          <td className="py-2.5 px-3 max-w-[220px]">
+                            <div className="font-heading font-bold text-xs uppercase text-[var(--color-text)] truncate">
+                              {p.name || 'Sin nombre'}
+                            </div>
+                            {p.description && (
+                              <div className="text-[11px] text-[var(--color-text-muted)] truncate font-sans">
+                                {p.description}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Tipología */}
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 border text-[10px] font-mono uppercase ${
+                                isResp
+                                  ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent)]/10'
+                                  : 'border-amber-500/80 text-amber-400 bg-amber-500/10'
+                              }`}
+                            >
+                              {isResp ? <Shield className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                              {isResp ? 'CONTROL' : 'PELIGRO'}
+                            </span>
+                          </td>
+
+                          {/* Severidad */}
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span
+                              className="px-2 py-0.5 border text-[10px] uppercase font-bold"
+                              style={{
+                                borderColor: isResp ? 'var(--color-accent)' : p.color || '#98989b',
+                                color: isResp ? 'var(--color-accent)' : p.color || '#98989b',
+                              }}
+                            >
+                              {p.severity}
+                            </span>
+                          </td>
+
+                          {/* RSO Asignado */}
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            {p.assigned_rso_id ? (
+                              <span className="flex items-center gap-1 text-[11px] text-[var(--color-text)]">
+                                <UserCheck className="w-3.5 h-3.5 text-[var(--color-accent)]" />
+                                Asignado
+                              </span>
+                            ) : (
+                              <span className="text-[11px] opacity-40">--</span>
+                            )}
+                          </td>
+
+                          {/* Restricciones Tácticas */}
+                          <td className="py-2.5 px-3 text-[11px] whitespace-nowrap">
+                            {p.is_curfew ? (
+                              <span className="text-amber-400 flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {p.curfew_start?.slice(0, 5)} - {p.curfew_end?.slice(0, 5)}
+                              </span>
+                            ) : p.buffer_meters > 0 ? (
+                              <span>Buffer: {p.buffer_meters}m</span>
+                            ) : (
+                              <span className="opacity-40">Estándar</span>
+                            )}
+                          </td>
+
+                          {/* Estado Activo / Inactivo */}
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span
+                              className={`px-1.5 py-0.5 text-[9px] uppercase border ${
+                                isActive
+                                  ? 'border-emerald-500/60 text-emerald-400 bg-emerald-500/10'
+                                  : 'border-red-500/60 text-red-400 bg-red-500/10'
+                              }`}
+                            >
+                              {isActive ? 'ACTIVA' : 'INACTIVA'}
+                            </span>
+                          </td>
+
+                          {/* Acciones */}
+                          <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* Inspeccionar en mapa lateral (Abierto a todos los roles, zoom 500m) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const zoneId = f.id || p.id;
+                                  const currentId = inspectingZone?.id || inspectingZone?.properties?.id;
+                                  if (inspectingZone && currentId === zoneId) {
+                                    setInspectingZone(null);
+                                  } else {
+                                    setInspectingZone(f);
+                                  }
+                                }}
+                                title="Inspeccionar en mapa lateral (Escala 500m)"
+                                className={`p-1 border transition-colors ${
+                                  (inspectingZone?.id || inspectingZone?.properties?.id) === (f.id || p.id)
+                                    ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent)]/15'
+                                    : 'border-[var(--color-divider)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] text-[var(--color-text-muted)]'
+                                }`}
+                              >
+                                <Crosshair className="w-3.5 h-3.5" />
+                              </button>
+
+                              {canManageZones && onEditZone && (
+                                <button
+                                  type="button"
+                                  onClick={() => onEditZone(f)}
+                                  title="Editar área táctica"
+                                  className="p-1 border border-[var(--color-divider)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] text-[var(--color-text-muted)] transition-colors"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {canManageZones && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleActive(f)}
+                                  title={isActive ? 'Desactivar zona (Soft-delete)' : 'Activar zona'}
+                                  className={`p-1 border transition-colors ${
+                                    isActive
+                                      ? 'border-[var(--color-divider)] hover:border-amber-500 hover:text-amber-400 text-[var(--color-text-muted)]'
+                                      : 'border-[var(--color-divider)] hover:border-emerald-500 hover:text-emerald-400 text-[var(--color-text-muted)]'
+                                  }`}
+                                >
+                                  <Power className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {canManageZones && (
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingZone(f)}
+                                  title="Eliminar área permanentemente"
+                                  className="p-1 border border-[var(--color-divider)] hover:border-red-500 hover:text-red-400 text-[var(--color-text-muted)] transition-colors"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </BlueprintPlate>
         </div>
-      </BlueprintPlate>
+
+        {/* Panel Lateral de Mapa Táctico de Inspección (A la derecha) */}
+        {inspectingZone && (
+          <div className="w-full lg:w-2/5 xl:w-1/3 flex-none flex flex-col min-h-[380px] lg:min-h-0 animate-in fade-in slide-in-from-right-2 duration-200">
+            <ZoneSideInspectionMap
+              zone={inspectingZone}
+              onClose={() => setInspectingZone(null)}
+              onExpand={() => {
+                const zId = inspectingZone.id || inspectingZone.properties?.id;
+                if (zId && onNavigateTerreno) {
+                  onNavigateTerreno(zId);
+                }
+              }}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Modal de Confirmación de Eliminación Permanente */}
       {deletingZone && (

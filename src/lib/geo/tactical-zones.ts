@@ -84,6 +84,13 @@ export function buildSeverityMatchExpression(): any {
 export const EARTH_RADIUS_KM = 6371.0088; // Radio medio volumétrico WGS84
 
 /**
+ * Nivel de zoom táctico canónico para enfocar una zona a escala de 500 metros
+ * sobre proyección WebMercator (WGS84). Permite al RSO tener el contexto operativo
+ * inmediato de la zona y hacer zoom in o out según la necesidad táctica.
+ */
+export const TACTICAL_ZONE_ZOOM_500M = 16.0;
+
+/**
  * Genera un polígono geodésico regular aproximando un círculo sobre WGS84.
  *
  * @param centerLng Longitud del centro en grados [-180, 180]

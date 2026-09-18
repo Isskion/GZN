@@ -113,6 +113,10 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
                 setIsCreateZoneModalOpen(true);
               }}
               onEditZone={handleEditZone}
+              onNavigateTerreno={(zoneId) => {
+                if (zoneId) setFocusZoneId(zoneId);
+                setActiveScreen('terreno');
+              }}
               refreshTrigger={refreshZonesCounter}
             />
           )}

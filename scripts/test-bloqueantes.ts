@@ -1340,6 +1340,54 @@ async function runTests() {
   assert(!modalSrcContent.includes('[initialCenter, resolveInferredCountry]'), 'applyInferredConfiguration no incluye resolveInferredCountry en sus dependencias');
   assert(Boolean(modalSrcContent.match(/\[initialCenter\]\s*\);/)), 'applyInferredConfiguration depende exclusivamente de initialCenter');
 
+  // ----------------------------------------------------------------------------
+  // 19. Navegación Táctica, Zoom Canónico 500m y Panel de Inspección Lateral
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 19. Navegación Táctica, Zoom Canónico 500m y Panel de Inspección Lateral ---');
+
+  // 1. Constante Canónica de Zoom Táctico a 500 Metros
+  const { TACTICAL_ZONE_ZOOM_500M } = await import('../src/lib/geo/tactical-zones');
+  assert(typeof TACTICAL_ZONE_ZOOM_500M === 'number' && TACTICAL_ZONE_ZOOM_500M === 16.0, 'tactical-zones.ts exporta TACTICAL_ZONE_ZOOM_500M = 16.0');
+
+  // 2. TerrenoScreen implementa zoom canónico y preserva inclinación 3D (Precisión Claude 1)
+  assert(terrenoSrcContent.includes('zoom: TACTICAL_ZONE_ZOOM_500M'), 'TerrenoScreen.tsx usa TACTICAL_ZONE_ZOOM_500M al enfocar zonas');
+  assert(terrenoSrcContent.includes('pitch: isMacro ? 0 : 20'), 'TerrenoScreen.tsx preserva inclinación táctica 20° para zonas operativas (Precisión Claude 1)');
+
+  // 3. Componente ZoneSideInspectionMap
+  const sideMapPath = path.resolve(process.cwd(), 'src/components/tactical/ZoneSideInspectionMap.tsx');
+  assert(fs.existsSync(sideMapPath), 'ZoneSideInspectionMap.tsx existe en src/components/tactical/');
+  const sideMapContent = fs.readFileSync(sideMapPath, 'utf8');
+  assert(sideMapContent.includes('export const ZoneSideInspectionMap'), 'ZoneSideInspectionMap.tsx exporta el componente ZoneSideInspectionMap');
+  assert(sideMapContent.includes('zoom: TACTICAL_ZONE_ZOOM_500M'), 'ZoneSideInspectionMap utiliza TACTICAL_ZONE_ZOOM_500M');
+  assert(sideMapContent.includes('map.remove()'), 'ZoneSideInspectionMap limpia la instancia de MapLibre en desmontaje (Precisión Claude 3)');
+  assert(sideMapContent.includes('setIsMapLoaded'), 'ZoneSideInspectionMap gestiona el estado desacoplado isMapLoaded (Precisión Claude 3)');
+  assert(sideMapContent.includes('ResizeObserver'), 'ZoneSideInspectionMap incluye ResizeObserver para redimensionamiento en split-view (Precisión Claude 3)');
+  assert(sideMapContent.includes('getSeverityColor'), 'ZoneSideInspectionMap utiliza la paleta canónica getSeverityColor');
+  assert(sideMapContent.includes('type="button"'), 'ZoneSideInspectionMap especifica type="button" en todos sus botones de control');
+  assert(sideMapContent.includes('Ampliar') && sideMapContent.includes('onExpand'), 'ZoneSideInspectionMap incluye acción Ampliar');
+  assert(sideMapContent.includes('onClose'), 'ZoneSideInspectionMap incluye acción Cerrar');
+
+  // 4. Integración en ZonasScreen: Split-view y botón abierto a todos los roles (Precisión Claude 2)
+  const zonasSrcPath = path.resolve(process.cwd(), 'src/components/screens/ZonasScreen.tsx');
+  const zonasSrcContent = fs.readFileSync(zonasSrcPath, 'utf8');
+  assert(zonasSrcContent.includes('ZoneSideInspectionMap'), 'ZonasScreen.tsx importa ZoneSideInspectionMap');
+  assert(zonasSrcContent.includes('Crosshair'), 'ZonasScreen.tsx importa Crosshair');
+  assert(zonasSrcContent.includes('onNavigateTerreno?: (zoneId: string) => void;'), 'ZonasScreenProps define onNavigateTerreno');
+  assert(zonasSrcContent.includes('inspectingZone'), 'ZonasScreen.tsx gestiona estado inspectingZone');
+  assert(zonasSrcContent.includes('lg:w-3/5') && zonasSrcContent.includes('lg:w-2/5'), 'ZonasScreen.tsx implementa diseño split-view responsive');
+
+  // Verificar que el botón Crosshair de inspección no está condicionado a canManageZones (Precisión Claude 2)
+  const crosshairIndex = zonasSrcContent.indexOf('title="Inspeccionar en mapa lateral (Escala 500m)"');
+  const canManageIndex = zonasSrcContent.indexOf('{canManageZones && onEditZone && (');
+  assert(crosshairIndex !== -1 && crosshairIndex < canManageIndex, 'Botón de inspección está disponible para todos los roles sin filtro canManageZones (Precisión Claude 2)');
+
+  // 5. Integración en RsoConsoleShell
+  const shellSrcPath = path.resolve(process.cwd(), 'src/components/industry/RsoConsoleShell.tsx');
+  const shellSrcContent = fs.readFileSync(shellSrcPath, 'utf8');
+  assert(shellSrcContent.includes('onNavigateTerreno={(zoneId) => {'), 'RsoConsoleShell.tsx conecta onNavigateTerreno con ZonasScreen');
+  assert(shellSrcContent.includes('if (zoneId) setFocusZoneId(zoneId);'), 'RsoConsoleShell.tsx actualiza focusZoneId al ampliar');
+  assert(shellSrcContent.includes("setActiveScreen('terreno');"), 'RsoConsoleShell.tsx navega a terreno al ampliar');
+
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);
   console.log('================================================================\n');

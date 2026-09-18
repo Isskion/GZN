@@ -21,6 +21,7 @@ import {
   getSeverityColor,
   buildSeverityMatchExpression,
   calculatePolygonCentroid,
+  TACTICAL_ZONE_ZOOM_500M,
 } from '@/lib/geo/tactical-zones';
 import { TacticalLayerSelector } from '@/components/map/TacticalLayerSelector';
 import { TacticalHud } from '@/components/map/TacticalHud';
@@ -490,11 +491,11 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
       const isMacro = z.name.toLowerCase().includes('teatro') || z.name.toLowerCase().includes('país') || z.name.toLowerCase().includes('operativo');
       mapRef.current.flyTo({
         center: z.center,
-        zoom: isMacro ? 5.5 : z.severity === 'RED' ? 13.5 : 14.5,
+        zoom: TACTICAL_ZONE_ZOOM_500M,
         pitch: isMacro ? 0 : 20,
         duration: 1200,
       });
-      setSimulationLog(`Enfocando ${z.name} [${z.severity}]`);
+      setSimulationLog(`Enfocando ${z.name} [${z.severity}] a escala táctica (500m)`);
     }
   };
 
