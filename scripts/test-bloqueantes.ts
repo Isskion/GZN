@@ -1207,6 +1207,8 @@ async function runTests() {
   assert(miniMapContent.includes('if (!map || !isMapLoaded) return;'), 'ZoneMiniMap.tsx gatea la actualización de fuentes y capas GeoJSON tras isMapLoaded');
   assert(miniMapContent.includes('getSeverityColor(severity, zoneType'), 'ZoneMiniMap.tsx utiliza la función canónica getSeverityColor');
   assert(miniMapContent.includes('results[0]'), 'ZoneMiniMap.tsx implementa selección consciente del primer resultado de geocoding');
+  assert(!miniMapContent.includes('<form'), 'ZoneMiniMap.tsx no utiliza etiquetas <form> anidadas para evitar submit accidental del modal');
+  assert(miniMapContent.includes('type="button"'), 'ZoneMiniMap.tsx utiliza type="button" para el control de ubicación');
 
   // 6. Smoke tests en ZoneCreationModal.tsx y TerrenoScreen.tsx (Mandato Claude / Corrección 2)
   const updatedModalContent = fs.readFileSync(modalPath, 'utf8');

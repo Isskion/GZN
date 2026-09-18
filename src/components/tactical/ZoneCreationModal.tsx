@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as topojson from 'topojson-client';
 import {
   Globe,
@@ -294,6 +294,32 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
     }
     return calculateRingAreaKm2(activeGeometry.coordinates[0]);
   }, [activeGeometry]);
+
+  // Callbacks estables para ZoneMiniMap (Evita re-enganchar listeners de clic innecesariamente)
+  const handleMiniMapCenterChange = useCallback((lng: number, lat: number) => {
+    setCenterLng(lng);
+    setCenterLat(lat);
+  }, []);
+
+  const handleMiniMapAddPoint = useCallback(([lng, lat]: [number, number]) => {
+    const newLine = `${lng.toFixed(4)}, ${lat.toFixed(4)}`;
+    setRawCoordinatesText((prev) =>
+      prev.trim() ? `${prev.trim()}\n${newLine}` : newLine
+    );
+  }, []);
+
+  const handleMiniMapClearPoints = useCallback(() => {
+    setRawCoordinatesText('');
+  }, []);
+
+  const handleMiniMapUndoPoint = useCallback(() => {
+    setRawCoordinatesText((prev) => {
+      const lines = prev.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (lines.length === 0) return '';
+      lines.pop();
+      return lines.join('\n');
+    });
+  }, []);
 
   // Validar y enviar (POST para alta, PATCH para edición)
   const handleSubmit = async (e: React.FormEvent) => {
@@ -756,6 +782,9 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
                         placeholder="Buscar país (ej: Malí, Níger, Ucrania, España...)"
                         value={countrySearch}
                         onChange={(e) => setCountrySearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.preventDefault();
+                        }}
                         className="w-full pl-9 pr-3 py-2 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
                       />
                     </div>
@@ -810,25 +839,10 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
                   rawCoordinatesText={rawCoordinatesText}
                   severity={severity}
                   zoneType={zoneType}
-                  onCenterChange={(lng, lat) => {
-                    setCenterLng(lng);
-                    setCenterLat(lat);
-                  }}
-                  onAddPoint={([lng, lat]) => {
-                    const newLine = `${lng.toFixed(4)}, ${lat.toFixed(4)}`;
-                    setRawCoordinatesText((prev) =>
-                      prev.trim() ? `${prev.trim()}\n${newLine}` : newLine
-                    );
-                  }}
-                  onClearPoints={() => setRawCoordinatesText('')}
-                  onUndoPoint={() => {
-                    setRawCoordinatesText((prev) => {
-                      const lines = prev.split('\n').map((l) => l.trim()).filter(Boolean);
-                      if (lines.length === 0) return '';
-                      lines.pop();
-                      return lines.join('\n');
-                    });
-                  }}
+                  onCenterChange={handleMiniMapCenterChange}
+                  onAddPoint={handleMiniMapAddPoint}
+                  onClearPoints={handleMiniMapClearPoints}
+                  onUndoPoint={handleMiniMapUndoPoint}
                 />
 
                 {/* MODALIDAD 2: RADIO TÁCTICO (Ajuste numérico fino y slider de radio) */}
@@ -851,6 +865,9 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
                           step="0.0001"
                           value={centerLng}
                           onChange={(e) => setCenterLng(parseFloat(e.target.value) || 0)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.preventDefault();
+                          }}
                           className="w-full px-3 py-1.5 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
                         />
                       </div>
@@ -863,6 +880,9 @@ export const ZoneCreationModal: React.FC<ZoneCreationModalProps> = ({
                           step="0.0001"
                           value={centerLat}
                           onChange={(e) => setCenterLat(parseFloat(e.target.value) || 0)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.preventDefault();
+                          }}
                           className="w-full px-3 py-1.5 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
                         />
                       </div>

@@ -317,8 +317,11 @@ export const ZoneMiniMap: React.FC<ZoneMiniMapProps> = ({
   }, [mode, activeGeometry]);
 
   // Ejecutar búsqueda toponímica con HERE Geocoding v7 (Toma determinísticamente el primer resultado)
-  const handleSearchSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSearchSubmit = async (e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     const query = searchQuery.trim();
     if (!query) return;
 
@@ -382,9 +385,9 @@ export const ZoneMiniMap: React.FC<ZoneMiniMapProps> = ({
 
   return (
     <div className="space-y-2">
-      {/* Barra de Búsqueda Toponímica para Modo Radio */}
+      {/* Barra de Búsqueda Toponímica para Modo Radio (Div independiente para evitar anidación de formularios HTML) */}
       {mode === 'radius' && (
-        <form onSubmit={handleSearchSubmit} className="space-y-1.5">
+        <div className="space-y-1.5">
           <div className="flex gap-1.5">
             <div className="relative flex-1">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[var(--color-text)] opacity-50" />
@@ -392,12 +395,24 @@ export const ZoneMiniMap: React.FC<ZoneMiniMapProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleSearchSubmit(e);
+                  }
+                }}
                 placeholder="Buscar lugar (ej: Bamako, Malí / Gao / Tombuctú)..."
                 className="w-full pl-8 pr-3 py-1.5 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:outline-none focus:border-[var(--color-accent)]"
               />
             </div>
             <button
-              type="submit"
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleSearchSubmit(e);
+              }}
               disabled={isSearching || !searchQuery.trim()}
               className="px-3 py-1.5 bg-[var(--color-accent)] text-white text-xs font-heading font-semibold uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
             >
@@ -433,7 +448,7 @@ export const ZoneMiniMap: React.FC<ZoneMiniMapProps> = ({
               <span className="truncate">{searchFeedback.text}</span>
             </div>
           )}
-        </form>
+        </div>
       )}
 
       {/* Controles de Ayuda para Modo Polígono Libre */}
