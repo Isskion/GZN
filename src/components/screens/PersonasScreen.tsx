@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Profile, UserRole, ROLE_LEVELS } from '@/types/database';
 import { BlueprintPlate } from '@/components/industry/BlueprintPlate';
-import { UserCreationModal } from '@/components/tactical/UserCreationModal';
+import { UserCreationModal, ZoneSummary } from '@/components/tactical/UserCreationModal';
 import { UserEditModal } from '@/components/tactical/UserEditModal';
 
 interface PersonasScreenProps {
@@ -33,6 +33,7 @@ export const PersonasScreen: React.FC<PersonasScreenProps> = ({
   currentUser,
 }) => {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [availableZones, setAvailableZones] = useState<ZoneSummary[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<RoleTab>('ALL');
@@ -78,8 +79,32 @@ export const PersonasScreen: React.FC<PersonasScreenProps> = ({
     }
   };
 
+  // Carga de zonas tácticas para asignación y visualización
+  const fetchZones = async () => {
+    try {
+      const res = await fetch('/api/zones');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.features) {
+          const mapped: ZoneSummary[] = data.features.map((f: any) => ({
+            id: f.properties.id,
+            name: f.properties.name,
+            zone_type: f.properties.zone_type,
+            severity: f.properties.severity,
+            color_hex: f.properties.color_hex,
+            assigned_rso_id: f.properties.assigned_rso_id,
+          }));
+          setAvailableZones(mapped);
+        }
+      }
+    } catch (err) {
+      console.error('[PersonasScreen] Error fetching zones:', err);
+    }
+  };
+
   useEffect(() => {
     fetchProfiles();
+    fetchZones();
   }, []);
 
   const showToast = (msg: string) => {
@@ -124,6 +149,7 @@ export const PersonasScreen: React.FC<PersonasScreenProps> = ({
 
   const handleUserCreated = (newProfile: Profile) => {
     setProfiles((prev) => [newProfile, ...prev]);
+    fetchZones();
     showToast(`Usuario ${newProfile.full_name} (${newProfile.role}) dado de alta.`);
   };
 
@@ -131,6 +157,7 @@ export const PersonasScreen: React.FC<PersonasScreenProps> = ({
     setProfiles((prev) =>
       prev.map((item) => (item.id === updated.id ? updated : item))
     );
+    fetchZones();
     showToast(`Ficha de ${updated.full_name} actualizada.`);
   };
 
@@ -376,7 +403,7 @@ export const PersonasScreen: React.FC<PersonasScreenProps> = ({
                 <th className="p-3">Identidad / Personal</th>
                 <th className="p-3">Rol & Jerarquía</th>
                 <th className="p-3">Contacto Operativo</th>
-                <th className="p-3">Supervisor RSO</th>
+                <th className="p-3">Supervisión / Zonas</th>
                 <th className="p-3">Estado</th>
                 <th className="p-3 text-right">Acciones</th>
               </tr>
@@ -455,7 +482,7 @@ export const PersonasScreen: React.FC<PersonasScreenProps> = ({
                         </div>
                       </td>
 
-                      {/* Supervisión RSO */}
+                      {/* Supervisión y Cobertura de Zonas */}
                       <td className="p-3 text-[11px] font-mono">
                         {p.role === 'OPERATOR' ? (
                           supervisorName ? (
@@ -465,8 +492,24 @@ export const PersonasScreen: React.FC<PersonasScreenProps> = ({
                           ) : (
                             <span className="text-muted italic">Sin asignar</span>
                           )
+                        ) : p.role === 'RSO' ? (
+                          <span className="text-emerald-400 font-semibold">
+                            {p.controlled_zone_ids && p.controlled_zone_ids.length > 0
+                              ? `${p.controlled_zone_ids.length} ${p.controlled_zone_ids.length === 1 ? 'zona' : 'zonas'}`
+                              : '0 zonas'}
+                          </span>
+                        ) : p.role === 'CONTROL_TOWER' ? (
+                          p.excluded_zone_ids && p.excluded_zone_ids.length > 0 ? (
+                            <span className="text-amber-400">
+                              {p.excluded_zone_ids.length} {p.excluded_zone_ids.length === 1 ? 'exclusión' : 'exclusiones'}
+                            </span>
+                          ) : (
+                            <span className="text-sky-400 font-semibold">
+                              Total (todas)
+                            </span>
+                          )
                         ) : (
-                          <span className="text-muted">N/A (Mando)</span>
+                          <span className="text-muted">100% Global</span>
                         )}
                       </td>
 
@@ -538,6 +581,7 @@ export const PersonasScreen: React.FC<PersonasScreenProps> = ({
         onUserCreated={handleUserCreated}
         callerRoleLevel={callerRoleLevel}
         availableSupervisors={availableSupervisors}
+        availableZones={availableZones}
       />
 
       {/* Modal de Edición de Usuario */}
@@ -548,6 +592,7 @@ export const PersonasScreen: React.FC<PersonasScreenProps> = ({
         currentUserId={currentUser?.id || currentProfile?.id}
         callerRoleLevel={callerRoleLevel}
         availableSupervisors={availableSupervisors}
+        availableZones={availableZones}
         onUserUpdated={handleUserUpdated}
       />
     </div>

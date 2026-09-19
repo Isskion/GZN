@@ -1528,7 +1528,7 @@ async function runTests() {
   assert(profilesRouteContent.includes("scope === 'hierarchy'"), 'GET /api/profiles implementa modo explícito scope === hierarchy para PersonasScreen');
   assert(profilesRouteContent.includes(".lte('role_level', callerProfile.role_level)"), 'GET /api/profiles filtra role_level <= caller en modo jerárquico');
   const getFunctionBody = profilesRouteContent.slice(profilesRouteContent.indexOf('export async function GET'), profilesRouteContent.indexOf('export async function POST'));
-  assert(!getFunctionBody.includes('createAdminClient()'), 'GET /api/profiles no invoca createAdminClient y opera 100% con cliente de sesión RLS (Anti-fuga Cross-Tenant)');
+  assert(!getFunctionBody.includes("adminClient.from('profiles')"), 'GET /api/profiles consulta profiles exclusivamente con cliente de sesión RLS (Anti-fuga Cross-Tenant)');
   assert(profilesRouteContent.includes('callerProfile.role_level < 60'), 'POST /api/profiles exige rango mínimo RSO (nivel 60)');
   assert(profilesRouteContent.includes('requestedRoleLevel > callerProfile.role_level'), 'POST /api/profiles valida techo jerárquico del invocador');
   assert(profilesRouteContent.includes('auth.admin.createUser') && profilesRouteContent.includes('auth.admin.deleteUser'), 'POST /api/profiles implementa aprovisionamiento atómico con rollback');
@@ -1573,6 +1573,73 @@ async function runTests() {
   // 8. Integración en RsoConsoleShell.tsx
   const shellCheckContent = fs.readFileSync(shellSrcPath, 'utf8');
   assert(shellCheckContent.includes('<PersonasScreen currentProfile={profile} currentUser={user} />'), 'RsoConsoleShell.tsx pasa currentProfile y currentUser a PersonasScreen');
+
+  // ----------------------------------------------------------------------------
+  // 22. Control y Asignación de Zonas por RSO y Torre de Control (Encargo Claude 19 Sept)
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 22. Control de Zonas por RSO (Inclusión) y Torre de Control (Exclusión) ---');
+
+  // 1. Migración SQL 015
+  const mig015Path = path.resolve(process.cwd(), 'sql/015_control_tower_zone_exclusions.sql');
+  assert(fs.existsSync(mig015Path), 'sql/015_control_tower_zone_exclusions.sql existe');
+  const mig015Content = fs.readFileSync(mig015Path, 'utf8');
+  assert(mig015Content.includes('CREATE TABLE IF NOT EXISTS public.zone_control_exclusions'), 'Migración 015 crea tabla zone_control_exclusions');
+  assert(mig015Content.includes('PRIMARY KEY (profile_id, zone_id)'), 'zone_control_exclusions define PRIMARY KEY compuesta (profile_id, zone_id)');
+  assert(mig015Content.includes('ALTER TABLE public.zone_control_exclusions ENABLE ROW LEVEL SECURITY;'), 'zone_control_exclusions habilita RLS');
+  assert(mig015Content.includes('Command staff can view zone exclusions in their org'), 'Migración 015 define política SELECT para mandos (>=60)');
+  assert(mig015Content.includes('Command staff can manage zone exclusions in their org'), 'Migración 015 define política ALL para gestión de exclusiones (>=60)');
+  assert(mig015Content.includes('public.get_auth_role_level() >= 100'), 'Política SELECT de zones: ORG_ADMIN (100) mantiene visibilidad total sin excepción');
+  assert(mig015Content.includes('public.get_auth_role_level() >= 80') && mig015Content.includes('NOT EXISTS ('), 'Política SELECT de zones: CONTROL_TOWER (80) filtra por zone_control_exclusions');
+  assert(mig015Content.includes('assigned_rso_id = auth.uid()'), 'Política SELECT de zones: RSO mantiene visibilidad de zonas asignadas');
+
+  // 2. Tipos en database.ts
+  const zoneTypesContent = fs.readFileSync(userMgmtDbTypesPath, 'utf8');
+  assert(zoneTypesContent.includes('controlled_zone_ids?: string[];'), 'database.ts Profile incluye controlled_zone_ids?: string[]');
+  assert(zoneTypesContent.includes('excluded_zone_ids?: string[];'), 'database.ts Profile incluye excluded_zone_ids?: string[]');
+  assert(zoneTypesContent.includes('export interface ZoneControlExclusion'), 'database.ts exporta interface ZoneControlExclusion');
+
+  // 3. Backend: POST /api/profiles y GET /api/profiles
+  const profilesApiContent = fs.readFileSync(profilesRoutePath, 'utf8');
+  assert(profilesApiContent.includes('controlled_zone_ids') && profilesApiContent.includes('assigned_rso_id: newProfile.id'), 'POST /api/profiles asigna zones.assigned_rso_id para nuevo RSO');
+  assert(profilesApiContent.includes('excluded_zone_ids') && profilesApiContent.includes('zone_control_exclusions'), 'POST /api/profiles inserta exclusiones para nuevo CONTROL_TOWER');
+  assert(profilesApiContent.includes('organization_id: callerProfile.organization_id'), 'POST /api/profiles valida tenant en asignación y exclusión de zonas');
+  assert(profilesApiContent.includes('item.controlled_zone_ids =') && profilesApiContent.includes('item.excluded_zone_ids ='), 'GET /api/profiles?scope=hierarchy enriquece perfiles con zonas asignadas y exclusiones');
+  assert(profilesApiContent.includes("adminClient\n        .from('zones')\n        .select('id, assigned_rso_id')") || (profilesApiContent.includes("adminClient") && profilesApiContent.includes("assigned_rso_id")), 'GET /api/profiles usa adminClient para enriquecer assignedZones sin ceguera RLS (Corrección Claude)');
+
+  // 4. Backend: GET y PATCH /api/profiles/[id]
+  const profileIdApiContent = fs.readFileSync(profileIdRoutePath, 'utf8');
+  assert(profileIdApiContent.includes('export async function GET'), 'GET /api/profiles/[id] implementado');
+  assert(profileIdApiContent.includes('controlled_zone_ids') && profileIdApiContent.includes('excluded_zone_ids'), 'GET /api/profiles/[id] retorna controlled_zone_ids y excluded_zone_ids');
+  assert(profileIdApiContent.includes("assigned_rso_id', targetUserId") && profileIdApiContent.includes("const adminClient = createAdminClient();"), 'GET /api/profiles/[id] usa adminClient para consultar assignedZones (Corrección Claude)');
+  assert(profileIdApiContent.includes('assigned_rso_id = NULL') || profileIdApiContent.includes('assigned_rso_id: null'), 'PATCH /api/profiles/[id] libera zonas desmarcadas para RSO (assigned_rso_id = NULL)');
+  assert(profileIdApiContent.includes('assigned_rso_id: targetUserId'), 'PATCH /api/profiles/[id] reasigna zonas marcadas al RSO sin bloquear');
+  assert(profileIdApiContent.includes("from('zone_control_exclusions')") && profileIdApiContent.includes('.delete()'), 'PATCH /api/profiles/[id] sincroniza exclusiones de CONTROL_TOWER borrando anteriores');
+  assert(profileIdApiContent.includes('Si deja de ser RSO, liberar todas sus zonas asignadas'), 'PATCH /api/profiles/[id] libera zonas huérfanas al cambiar de rol desde RSO');
+  assert(profileIdApiContent.includes('Si deja de ser CONTROL_TOWER, purgar todas sus exclusiones'), 'PATCH /api/profiles/[id] limpia exclusiones huérfanas al cambiar de rol desde CONTROL_TOWER');
+  assert(profileIdApiContent.includes("currentAssigned") && profileIdApiContent.includes("adminClient\n          .from('zones')\n          .select('id')\n          .eq('assigned_rso_id', targetUserId)"), 'PATCH /api/profiles/[id] usa adminClient para consultar currentAssigned del RSO objetivo (Corrección Claude)');
+
+  // 5. Componente UserCreationModal.tsx
+  assert(userCreationModalContent.includes('handleToggleRsoZone'), 'UserCreationModal implementa lista de inclusión para RSO');
+  assert(userCreationModalContent.includes('handleToggleControlTowerZone'), 'UserCreationModal implementa lista de exclusión para CONTROL_TOWER');
+  assert(userCreationModalContent.includes('Se reasignará a este RSO'), 'UserCreationModal muestra aviso de reasignación automática de zonas');
+  assert(userCreationModalContent.includes('[EXCLUIDA / RESTRINGIDA]'), 'UserCreationModal muestra indicador de exclusión táctica');
+  assert(userCreationModalContent.includes('payload.controlled_zone_ids = controlledZoneIds'), 'UserCreationModal envía controlled_zone_ids en POST para RSO');
+  assert(userCreationModalContent.includes('payload.excluded_zone_ids = excludedZoneIds'), 'UserCreationModal envía excluded_zone_ids en POST para CONTROL_TOWER');
+
+  // 6. Componente UserEditModal.tsx
+  const userEditModalContentUpdated = fs.readFileSync(userEditModalPath, 'utf8');
+  assert(userEditModalContentUpdated.includes('handleToggleRsoZone'), 'UserEditModal implementa lista de inclusión para RSO');
+  assert(userEditModalContentUpdated.includes('handleToggleControlTowerZone'), 'UserEditModal implementa lista de exclusión para CONTROL_TOWER');
+  assert(userEditModalContentUpdated.includes('payload.controlled_zone_ids = controlledZoneIds'), 'UserEditModal envía controlled_zone_ids en PATCH para RSO');
+  assert(userEditModalContentUpdated.includes('payload.excluded_zone_ids = excludedZoneIds'), 'UserEditModal envía excluded_zone_ids en PATCH para CONTROL_TOWER');
+  assert(userEditModalContentUpdated.includes('Se desasignará al guardar'), 'UserEditModal alerta visualmente de zonas que se liberarán al desmarcar');
+
+  // 7. Pantalla PersonasScreen.tsx
+  const personasScreenUpdated = fs.readFileSync(personasScreenPath, 'utf8');
+  assert(personasScreenUpdated.includes('availableZones={availableZones}'), 'PersonasScreen pasa availableZones a UserCreationModal y UserEditModal');
+  assert(personasScreenUpdated.includes('Supervisión / Zonas'), 'PersonasScreen incluye columna Supervisión / Zonas');
+  assert(personasScreenUpdated.includes('p.controlled_zone_ids'), 'PersonasScreen visualiza número de zonas controladas por RSO');
+  assert(personasScreenUpdated.includes('p.excluded_zone_ids'), 'PersonasScreen visualiza número de zonas excluidas por CONTROL_TOWER');
 
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);

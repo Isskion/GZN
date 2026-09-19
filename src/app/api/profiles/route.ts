@@ -77,9 +77,42 @@ export async function GET(request: NextRequest) {
         );
       }
 
+      // Enriquecer con zonas asignadas a RSOs y exclusiones de Torre de Control
+      // Se utiliza adminClient acotado por organization_id para que la RLS de zones
+      // no oculte las zonas asignadas a compañeros de nivel 60 dentro del mismo tenant.
+      const adminClient = createAdminClient();
+      const { data: assignedZones } = await adminClient
+        .from('zones')
+        .select('id, assigned_rso_id')
+        .eq('organization_id', callerProfile.organization_id)
+        .not('assigned_rso_id', 'is', null);
+
+      const profileIds = (profiles || []).map((p: any) => p.id);
+      const { data: exclusions } = profileIds.length > 0
+        ? await adminClient
+            .from('zone_control_exclusions')
+            .select('profile_id, zone_id')
+            .in('profile_id', profileIds)
+        : { data: [] };
+
+      const enrichedProfiles = (profiles || []).map((p: any) => {
+        const item = { ...p };
+        if (p.role === 'RSO') {
+          item.controlled_zone_ids = (assignedZones || [])
+            .filter((z: any) => z.assigned_rso_id === p.id)
+            .map((z: any) => z.id);
+        }
+        if (p.role === 'CONTROL_TOWER') {
+          item.excluded_zone_ids = (exclusions || [])
+            .filter((e: any) => e.profile_id === p.id)
+            .map((e: any) => e.zone_id);
+        }
+        return item;
+      });
+
       return NextResponse.json({
-        data: profiles || [],
-        profiles: profiles || [],
+        data: enrichedProfiles,
+        profiles: enrichedProfiles,
         caller_role_level: callerProfile.role_level,
       });
     }
@@ -108,9 +141,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { authenticated, user, error: authError } = await getAuthenticatedSession(request);
+    const { authenticated, user, supabase, error: authError } = await getAuthenticatedSession(request);
 
-    if (!authenticated || !user) {
+    if (!authenticated || !user || !supabase) {
       return NextResponse.json(
         { error: `No autorizado: ${authError || 'Se requiere sesión activa'}` },
         { status: 401 }
@@ -142,7 +175,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const { full_name, email, password, role, phone, emergency_contact, supervising_rso_id } = body;
+    const {
+      full_name,
+      email,
+      password,
+      role,
+      phone,
+      emergency_contact,
+      supervising_rso_id,
+      controlled_zone_ids,
+      excluded_zone_ids,
+    } = body;
 
     // 3. Validaciones de entrada
     if (!full_name || typeof full_name !== 'string' || !full_name.trim()) {
@@ -249,6 +292,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let finalControlledZoneIds: string[] = [];
+    let finalExcludedZoneIds: string[] = [];
+
+    // 8.1 Asignación de Zonas bajo Control para Oficial RSO (Lista de Inclusión / Reasignación directa)
+    if (role === 'RSO' && Array.isArray(controlled_zone_ids) && controlled_zone_ids.length > 0) {
+      const { data: validZones } = await adminClient
+        .from('zones')
+        .select('id')
+        .eq('organization_id', callerProfile.organization_id)
+        .in('id', controlled_zone_ids);
+
+      const validZoneIds: string[] = (validZones || []).map((z: any) => z.id);
+      if (validZoneIds.length > 0) {
+        // Reasigna sin preguntar (Decisión 1 confirmada de Daniel)
+        await supabase
+          .from('zones')
+          .update({ assigned_rso_id: newProfile.id, updated_at: new Date().toISOString() })
+          .in('id', validZoneIds)
+          .eq('organization_id', callerProfile.organization_id);
+        finalControlledZoneIds = validZoneIds;
+      }
+    }
+
+    // 8.2 Exclusiones de Control de Zonas para Torre de Control (Lista de Exclusión)
+    if (role === 'CONTROL_TOWER' && Array.isArray(excluded_zone_ids) && excluded_zone_ids.length > 0) {
+      const { data: validZones } = await adminClient
+        .from('zones')
+        .select('id')
+        .eq('organization_id', callerProfile.organization_id)
+        .in('id', excluded_zone_ids);
+
+      const validExcludedIds: string[] = (validZones || []).map((z: any) => z.id);
+      if (validExcludedIds.length > 0) {
+        const exclusionRows = validExcludedIds.map((zid) => ({
+          profile_id: newProfile.id,
+          zone_id: zid,
+        }));
+        await supabase
+          .from('zone_control_exclusions')
+          .insert(exclusionRows);
+        finalExcludedZoneIds = validExcludedIds;
+      }
+    }
+
     // 9. Registro DPIA / Auditoría inmutable
     await logAuditEvent(adminClient, {
       organization_id: callerProfile.organization_id,
@@ -262,13 +349,21 @@ export async function POST(request: NextRequest) {
         role: newProfile.role,
         role_level: newProfile.role_level,
         supervising_rso_id: newProfile.supervising_rso_id,
+        controlled_zone_ids: finalControlledZoneIds,
+        excluded_zone_ids: finalExcludedZoneIds,
       },
     });
 
+    const responseProfile = {
+      ...newProfile,
+      controlled_zone_ids: finalControlledZoneIds,
+      excluded_zone_ids: finalExcludedZoneIds,
+    };
+
     return NextResponse.json(
       {
-        data: newProfile,
-        profile: newProfile,
+        data: responseProfile,
+        profile: responseProfile,
         message: `Usuario ${newProfile.full_name} (${newProfile.role}) dado de alta satisfactoriamente`,
       },
       { status: 201 }

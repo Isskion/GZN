@@ -1,13 +1,12 @@
 // ==============================================================================
-// GZN — API ROUTE: MODIFICACIÓN Y ESTADO DE PERFIL (/api/profiles/[id])
+// GZN — API ROUTE: MODIFICACIÓN, DETALLE Y CONTROL DE ZONAS (/api/profiles/[id])
 // ==============================================================================
-// Control de Acceso y Jerarquía Estricta:
-// 1. Aislamiento Multi-Tenant: Solo perfiles de la misma organización.
-// 2. Techo Jerárquico: El invocador solo puede editar usuarios de nivel <= caller_role_level.
-// 3. Anti-Autoescalamiento: Un usuario no puede alterar su propio rol ni role_level.
-// 4. Anti-Autobloqueo: Un usuario no puede desactivar su propia cuenta (is_active = false).
-// 5. Asignación de Roles: El nuevo rol asignado no puede exceder el nivel del invocador.
-// 6. Registro de Auditoría DPIA: Evento inmutable USER_UPDATED en public.audit_logs.
+// 1. GET: Consulta individual de perfil con zonas bajo control (RSO) o exclusiones (CONTROL_TOWER).
+// 2. PATCH: Modificación de datos y sincronización completa de control de zonas:
+//    - RSO: Sincronización de zones.assigned_rso_id (reasignación sin bloquear + liberación de no seleccionadas).
+//    - CONTROL_TOWER: Sincronización de zone_control_exclusions (lista de exclusión de visibilidad total).
+//    - Cambio de rol: Limpieza automática de zonas asignadas o exclusiones huérfanas.
+//    - Anti-Autoescalamiento y Anti-Autobloqueo bajo estricto RLS.
 // ==============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -15,6 +14,79 @@ import { getAuthenticatedSession } from '@/lib/auth/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { ROLE_LEVELS, UserRole } from '@/types/database';
 import { logAuditEvent } from '@/lib/audit/logger';
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { authenticated, user, supabase, error: authError } = await getAuthenticatedSession(request);
+
+    if (!authenticated || !user || !supabase) {
+      return NextResponse.json(
+        { error: `No autorizado: ${authError || 'Se requiere sesión activa'}` },
+        { status: 401 }
+      );
+    }
+
+    const resolvedParams = await Promise.resolve(params);
+    const targetUserId = resolvedParams.id;
+
+    if (!targetUserId) {
+      return NextResponse.json({ error: 'ID de perfil no especificado' }, { status: 400 });
+    }
+
+    // Consulta del perfil bajo RLS del cliente de sesión
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, organization_id, full_name, email, role, role_level, phone, emergency_contact, supervising_rso_id, is_active, created_at, updated_at')
+      .eq('id', targetUserId)
+      .single();
+
+    if (profileError || !profile) {
+      return NextResponse.json(
+        { error: 'Perfil no encontrado o fuera de su alcance jerárquico' },
+        { status: 404 }
+      );
+    }
+
+    let controlledZoneIds: string[] = [];
+    let excludedZoneIds: string[] = [];
+
+    // Se utiliza adminClient acotado a la organización para que la RLS de zones
+    // no oculte las zonas de un RSO al ser consultadas por otro RSO del mismo rango.
+    const adminClient = createAdminClient();
+
+    // Zonas asignadas si es Oficial RSO
+    if (profile.role === 'RSO') {
+      const { data: assignedZones } = await adminClient
+        .from('zones')
+        .select('id')
+        .eq('assigned_rso_id', targetUserId)
+        .eq('organization_id', profile.organization_id);
+      controlledZoneIds = (assignedZones || []).map((z: any) => z.id);
+    }
+
+    // Zonas excluidas si es Torre de Control
+    if (profile.role === 'CONTROL_TOWER') {
+      const { data: exclusions } = await adminClient
+        .from('zone_control_exclusions')
+        .select('zone_id')
+        .eq('profile_id', targetUserId);
+      excludedZoneIds = (exclusions || []).map((e: any) => e.zone_id);
+    }
+
+    const responseData = {
+      ...profile,
+      controlled_zone_ids: controlledZoneIds,
+      excluded_zone_ids: excludedZoneIds,
+    };
+
+    return NextResponse.json({ data: responseData, profile: responseData });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+  }
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -152,6 +224,9 @@ export async function PATCH(
       profileUpdates.role_level = newRoleLevel;
     }
 
+    const previousRole = targetProfile.role;
+    const effectiveRole = profileUpdates.role || targetProfile.role;
+
     // 7. Modificación de Datos de Contacto y Metadatos
     if (typeof body.full_name === 'string' && body.full_name.trim()) {
       profileUpdates.full_name = body.full_name.trim();
@@ -176,7 +251,6 @@ export async function PATCH(
     }
 
     // 8. Validación de Supervisor RSO (solo para operadores)
-    const effectiveRole = profileUpdates.role || targetProfile.role;
     if (effectiveRole === 'OPERATOR') {
       if (typeof body.supervising_rso_id !== 'undefined') {
         if (body.supervising_rso_id === null || body.supervising_rso_id === '') {
@@ -250,7 +324,112 @@ export async function PATCH(
       );
     }
 
-    // 11. Registro de Auditoría DPIA
+    let finalControlledZoneIds: string[] = [];
+    let finalExcludedZoneIds: string[] = [];
+
+    // 11. SINCRONIZACIÓN DE ZONAS BAJO CONTROL (Oficial RSO)
+    if (effectiveRole === 'RSO') {
+      if (typeof body.controlled_zone_ids !== 'undefined' && Array.isArray(body.controlled_zone_ids)) {
+        // Validar que todas las zonas enviadas pertenezcan a la organización del tenant (con adminClient para evitar ceguera RLS)
+        const { data: validZones } = await adminClient
+          .from('zones')
+          .select('id')
+          .eq('organization_id', callerProfile.organization_id)
+          .in('id', body.controlled_zone_ids);
+        const newZoneIds: string[] = (validZones || []).map((z: any) => z.id);
+
+        // Consultar zonas asignadas actualmente a este RSO (con adminClient para ver las asignadas aunque el invocador sea otro RSO)
+        const { data: currentAssigned } = await adminClient
+          .from('zones')
+          .select('id')
+          .eq('assigned_rso_id', targetUserId)
+          .eq('organization_id', callerProfile.organization_id);
+        const currentZoneIds: string[] = (currentAssigned || []).map((z: any) => z.id);
+
+        // Zonas que eran suyas y ya no están en controlled_zone_ids -> liberar (assigned_rso_id = NULL)
+        const toUnassign = currentZoneIds.filter((id) => !newZoneIds.includes(id));
+        if (toUnassign.length > 0) {
+          await supabase
+            .from('zones')
+            .update({ assigned_rso_id: null, updated_at: new Date().toISOString() })
+            .in('id', toUnassign)
+            .eq('organization_id', callerProfile.organization_id);
+        }
+
+        // Zonas que se le asignan nuevas -> assigned_rso_id = targetUserId (reasignación sin bloquear)
+        const toAssign = newZoneIds.filter((id) => !currentZoneIds.includes(id));
+        if (toAssign.length > 0) {
+          await supabase
+            .from('zones')
+            .update({ assigned_rso_id: targetUserId, updated_at: new Date().toISOString() })
+            .in('id', toAssign)
+            .eq('organization_id', callerProfile.organization_id);
+        }
+
+        finalControlledZoneIds = newZoneIds;
+      } else {
+        // Mantener las asignaciones actuales si no se enviaron cambios
+        const { data: currentAssigned } = await adminClient
+          .from('zones')
+          .select('id')
+          .eq('assigned_rso_id', targetUserId)
+          .eq('organization_id', callerProfile.organization_id);
+        finalControlledZoneIds = (currentAssigned || []).map((z: any) => z.id);
+      }
+    } else if (previousRole === 'RSO' && effectiveRole !== 'RSO') {
+      // Si deja de ser RSO, liberar todas sus zonas asignadas
+      await supabase
+        .from('zones')
+        .update({ assigned_rso_id: null, updated_at: new Date().toISOString() })
+        .eq('assigned_rso_id', targetUserId)
+        .eq('organization_id', callerProfile.organization_id);
+    }
+
+    // 12. SINCRONIZACIÓN DE EXCLUSIONES DE CONTROL (Torre de Control)
+    if (effectiveRole === 'CONTROL_TOWER') {
+      if (typeof body.excluded_zone_ids !== 'undefined' && Array.isArray(body.excluded_zone_ids)) {
+        // Validar que las zonas existan en la organización
+        const { data: validZones } = await adminClient
+          .from('zones')
+          .select('id')
+          .eq('organization_id', callerProfile.organization_id)
+          .in('id', body.excluded_zone_ids);
+        const validExcludedIds: string[] = (validZones || []).map((z: any) => z.id);
+
+        // Sincronización completa: purgar exclusiones anteriores de este usuario
+        await supabase
+          .from('zone_control_exclusions')
+          .delete()
+          .eq('profile_id', targetUserId);
+
+        // Insertar conjunto nuevo de exclusiones
+        if (validExcludedIds.length > 0) {
+          const rows = validExcludedIds.map((zid) => ({
+            profile_id: targetUserId,
+            zone_id: zid,
+          }));
+          await supabase
+            .from('zone_control_exclusions')
+            .insert(rows);
+        }
+
+        finalExcludedZoneIds = validExcludedIds;
+      } else {
+        const { data: currentExclusions } = await adminClient
+          .from('zone_control_exclusions')
+          .select('zone_id')
+          .eq('profile_id', targetUserId);
+        finalExcludedZoneIds = (currentExclusions || []).map((e: any) => e.zone_id);
+      }
+    } else if (previousRole === 'CONTROL_TOWER' && effectiveRole !== 'CONTROL_TOWER') {
+      // Si deja de ser CONTROL_TOWER, purgar todas sus exclusiones
+      await supabase
+        .from('zone_control_exclusions')
+        .delete()
+        .eq('profile_id', targetUserId);
+    }
+
+    // 13. Registro de Auditoría DPIA
     await logAuditEvent(adminClient, {
       organization_id: callerProfile.organization_id,
       performed_by: user.id,
@@ -262,12 +441,20 @@ export async function PATCH(
         target_role: updatedProfile.role,
         target_role_level: updatedProfile.role_level,
         changes: profileUpdates,
+        controlled_zone_ids: effectiveRole === 'RSO' ? finalControlledZoneIds : undefined,
+        excluded_zone_ids: effectiveRole === 'CONTROL_TOWER' ? finalExcludedZoneIds : undefined,
       },
     });
 
+    const responseProfile = {
+      ...updatedProfile,
+      controlled_zone_ids: finalControlledZoneIds,
+      excluded_zone_ids: finalExcludedZoneIds,
+    };
+
     return NextResponse.json({
-      data: updatedProfile,
-      profile: updatedProfile,
+      data: responseProfile,
+      profile: responseProfile,
       message: `Perfil de ${updatedProfile.full_name} actualizado correctamente`,
     });
   } catch (err: any) {

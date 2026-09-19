@@ -81,6 +81,8 @@ export interface Profile {
   screen_access?: Record<string, boolean> | null;
   phone?: string | null;
   emergency_contact?: string | null;
+  controlled_zone_ids?: string[];
+  excluded_zone_ids?: string[];
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -131,6 +133,12 @@ export interface Zone {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface ZoneControlExclusion {
+  profile_id: string;
+  zone_id: string;
+  created_at?: string;
 }
 
 export interface Briefing {
