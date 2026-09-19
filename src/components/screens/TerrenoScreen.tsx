@@ -59,21 +59,32 @@ interface TravelerItem {
 interface TerrenoScreenProps {
   onAlertTriggered?: (count: number) => void;
   canManageZones?: boolean;
+  canManageTravelers?: boolean;
   onOpenCreateZone?: () => void;
+  onOpenCreateTraveler?: () => void;
   onEditZone?: (zone: any) => void;
   refreshTrigger?: number;
   focusZoneId?: string | null;
   onFocusZoneConsumed?: () => void;
+  onRegisterNavigationHandlers?: (handlers: {
+    centerFleet: () => void;
+    centerRedZone: () => void;
+    centerSafeHaven: () => void;
+    getMapCenter: () => { lat: number; lon: number };
+  }) => void;
 }
 
 export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
   onAlertTriggered,
   canManageZones = false,
+  canManageTravelers = false,
   onOpenCreateZone,
+  onOpenCreateTraveler,
   onEditZone,
   refreshTrigger = 0,
   focusZoneId,
   onFocusZoneConsumed,
+  onRegisterNavigationHandlers,
 }) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -86,9 +97,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
   // Motor Cartográfico HERE (Módulo 2)
   const [activeLayer, setActiveLayer] = useState<HereMapStyleId>('explore.night');
   const [cursorCoords, setCursorCoords] = useState<{ lat: number; lon: number } | null>(null);
-  // NOTA OPSEC / TELEMETRÍA DE MUESTRA:
-  // Coordenadas de muestra para evaluación técnica de geocercas y capas tácticas.
-  // La ubicación inicial es un dato de demostración y no un requisito fijo de producto.
+  // Coordenadas iniciales del centro táctico
   const [centerCoords, setCenterCoords] = useState<{ lat: number; lon: number }>({
     lat: 40.4168,
     lon: -3.7038,
@@ -101,39 +110,49 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
   const hereApiKey = process.env.NEXT_PUBLIC_HERE_API_KEY;
   const isHereConfigured = !!hereApiKey;
 
-  // Sujetos tácticos en el sector
-  const [travelers, setTravelers] = useState<TravelerItem[]>([
-    {
-      id: 't-01',
-      name: 'Carlos Mendoza',
-      callsign: 'CONVOY-ALFA',
-      status: 'SAFE',
-      lat: 40.4168,
-      lon: -3.7038,
-      battery: 84,
-      lastPing: 'Hace 30 seg',
-    },
-    {
-      id: 't-02',
-      name: 'Sofía Valdés',
-      callsign: 'VIP-BRAVO',
-      status: 'WARNING',
-      lat: 40.4220,
-      lon: -3.6920,
-      battery: 42,
-      lastPing: 'Hace 1 min',
-    },
-    {
-      id: 't-03',
-      name: 'Javier Castillo',
-      callsign: 'LOG-CHARLIE',
-      status: 'SAFE',
-      lat: 40.4050,
-      lon: -3.6880,
-      battery: 95,
-      lastPing: 'Hace 10 seg',
-    },
-  ]);
+  // Sujetos tácticos en el sector (El Rebaño cargado dinámicamente desde /api/travelers)
+  const [travelers, setTravelers] = useState<TravelerItem[]>([]);
+  const [isLoadingTravelers, setIsLoadingTravelers] = useState<boolean>(true);
+
+  // Cargar viajeros reales desde la API (GET /api/travelers)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchTravelers = async () => {
+      try {
+        setIsLoadingTravelers(true);
+        const res = await fetch('/api/travelers?limit=100');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!isMounted) return;
+
+        const rawList = data.travelers || data.data || [];
+        const mapped: TravelerItem[] = rawList
+          .filter((t: any) => typeof t.last_latitude === 'number' && typeof t.last_longitude === 'number')
+          .map((t: any) => ({
+            id: String(t.id),
+            name: t.full_name,
+            callsign: t.callsign || t.full_name,
+            status: t.status || 'SAFE',
+            lat: t.last_latitude,
+            lon: t.last_longitude,
+            battery: t.battery_level ?? 100,
+            lastPing: t.last_ping_at ? 'Conectado' : 'Sin enlace',
+          }));
+
+        setTravelers(mapped);
+      } catch (err) {
+        console.error('Error cargando viajeros de la base de datos:', err);
+      } finally {
+        if (isMounted) setIsLoadingTravelers(false);
+      }
+    };
+
+    fetchTravelers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [refreshTrigger]);
 
   const [zones, setZones] = useState<ZoneItem[]>([]);
   const [isLoadingZones, setIsLoadingZones] = useState<boolean>(true);
@@ -241,86 +260,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
     });
 
     map.on('load', () => {
-      // 1. Capa de Zona Roja
-      map.addSource('red-zone', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          geometry: {
-            type: 'Polygon',
-            coordinates: [[
-              [-3.7150, 40.4250],
-              [-3.6950, 40.4250],
-              [-3.6950, 40.4350],
-              [-3.7150, 40.4350],
-              [-3.7150, 40.4250],
-            ]],
-          },
-          properties: { name: 'Zona Roja - Conflicto Táctico' },
-        },
-      });
-
-      map.addLayer({
-        id: 'red-zone-fill',
-        type: 'fill',
-        source: 'red-zone',
-        paint: {
-          'fill-color': '#e07a6a',
-          'fill-opacity': 0.32,
-        },
-      });
-
-      map.addLayer({
-        id: 'red-zone-line',
-        type: 'line',
-        source: 'red-zone',
-        paint: {
-          'line-color': '#e07a6a',
-          'line-width': 2,
-          'line-dasharray': [3, 2],
-        },
-      });
-
-      // 2. Capa de Safe Haven
-      map.addSource('safe-haven', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          geometry: {
-            type: 'Polygon',
-            coordinates: [[
-              [-3.7100, 40.4000],
-              [-3.6980, 40.4000],
-              [-3.6980, 40.4080],
-              [-3.7100, 40.4080],
-              [-3.7100, 40.4000],
-            ]],
-          },
-          properties: { name: 'Safe Haven - Embajada Táctica' },
-        },
-      });
-
-      map.addLayer({
-        id: 'safe-haven-fill',
-        type: 'fill',
-        source: 'safe-haven',
-        paint: {
-          'fill-color': '#63b598',
-          'fill-opacity': 0.28,
-        },
-      });
-
-      map.addLayer({
-        id: 'safe-haven-line',
-        type: 'line',
-        source: 'safe-haven',
-        paint: {
-          'line-color': '#63b598',
-          'line-width': 2,
-        },
-      });
-
-      // Notificar que el estilo y mapa base están listos
+      // Notificar que el estilo y mapa base están listos (las zonas se cargan exclusivamente desde PostGIS)
       setIsMapLoaded(true);
     });
 
@@ -510,55 +450,107 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
   }, [focusZoneId, isMapLoaded, zones]);
 
   const handleCenterFleet = () => {
-    if (!mapRef.current || travelers.length === 0) return;
+    if (!mapRef.current) return;
+    const withCoords = travelers.filter((t) => typeof t.lat === 'number' && typeof t.lon === 'number');
+    if (withCoords.length === 0) {
+      setSimulationLog('No hay viajeros con coordenadas activas en el sector.');
+      return;
+    }
     const bounds = new maplibregl.LngLatBounds();
-    travelers.forEach((t) => bounds.extend([t.lon, t.lat]));
-    mapRef.current.fitBounds(bounds, { padding: 90, maxZoom: 15, duration: 1200 });
+    withCoords.forEach((t) => bounds.extend([t.lon, t.lat]));
+    mapRef.current.fitBounds(bounds, { padding: 90, maxZoom: 16, duration: 1200 });
+    setSimulationLog(`Encuadrando el rebaño (${withCoords.length} activos en el sector).`);
   };
 
   const handleCenterRedZone = () => {
-    mapRef.current?.flyTo({ center: [-3.7050, 40.4300], zoom: 14, duration: 1200 });
+    if (!mapRef.current) return;
+    const redZone = zones.find((z) => z.severity === 'RED') || zones.find((z) => z.zone_type === 'THREAT');
+    if (redZone && redZone.center) {
+      mapRef.current.flyTo({ center: redZone.center, zoom: TACTICAL_ZONE_ZOOM_500M, pitch: 20, duration: 1200 });
+      setSimulationLog(`Enfocando sector crítico: ${redZone.name} [${redZone.severity}] a 500m.`);
+    } else {
+      setSimulationLog('Sin zonas críticas catalogadas en el teatro.');
+    }
   };
 
   const handleCenterSafeHaven = () => {
-    mapRef.current?.flyTo({ center: [-3.7040, 40.4040], zoom: 15, duration: 1200 });
+    if (!mapRef.current) return;
+    const safeHaven = zones.find((z) => z.severity === 'SAFE_HAVEN') || zones.find((z) => z.zone_type === 'RESPONSIBILITY');
+    if (safeHaven && safeHaven.center) {
+      mapRef.current.flyTo({ center: safeHaven.center, zoom: TACTICAL_ZONE_ZOOM_500M, pitch: 0, duration: 1200 });
+      setSimulationLog(`Enfocando refugio seguro: ${safeHaven.name} a 500m.`);
+    } else {
+      setSimulationLog('Sin refugios seguros catalogados en el teatro.');
+    }
   };
 
+  // Registrar handlers de navegación táctica hacia RsoConsoleShell / FloatingRsoButton
+  const centerCoordsRef = useRef(centerCoords);
+  centerCoordsRef.current = centerCoords;
+
+  useEffect(() => {
+    onRegisterNavigationHandlers?.({
+      centerFleet: handleCenterFleet,
+      centerRedZone: handleCenterRedZone,
+      centerSafeHaven: handleCenterSafeHaven,
+      getMapCenter: () => {
+        if (mapRef.current) {
+          const c = mapRef.current.getCenter();
+          return { lat: c.lat, lon: c.lng };
+        }
+        return centerCoordsRef.current;
+      },
+    });
+  }, [travelers, zones]);
+
   const handleSimulateIntrusion = () => {
+    if (travelers.length === 0) {
+      setSimulationLog('Sin activos reales en el sector para simular incursión.');
+      return;
+    }
+    const target = travelers[0];
+    const redZone = zones.find((z) => z.severity === 'RED');
+    const targetCenter: [number, number] = redZone?.center ?? [target.lon + 0.005, target.lat + 0.005];
+
     setIsSimulating(true);
-    setSimulationLog('Simulando desplazamiento de CONVOY-ALFA hacia el interior de la Zona Roja...');
+    setSimulationLog(`Simulando desplazamiento de ${target.callsign} hacia ${redZone?.name || 'perímetro táctico'}...`);
 
     setTimeout(() => {
       setTravelers((prev) =>
         prev.map((t) =>
-          t.id === 't-01'
-            ? { ...t, lat: 40.4280, lon: -3.7050, status: 'DANGER', lastPing: 'Ahora mismo' }
+          t.id === target.id
+            ? { ...t, lat: targetCenter[1], lon: targetCenter[0], status: 'DANGER', lastPing: 'Ahora mismo' }
             : t
         )
       );
       onAlertTriggered?.(2);
-      setSimulationLog('🚨 GEOPROTECT TRIGGER: CONVOY-ALFA ha violado el perímetro de ZONA ROJA.');
+      setSimulationLog(`🚨 GEOPROTECT TRIGGER: ${target.callsign} ha violado el perímetro de ${redZone?.name || 'peligro'}.`);
       setIsSimulating(false);
-      mapRef.current?.flyTo({ center: [-3.7050, 40.4280], zoom: 15, pitch: 35, duration: 1000 });
+      mapRef.current?.flyTo({ center: targetCenter, zoom: 15.5, pitch: 35, duration: 1000 });
     }, 1200);
   };
 
   const handleSimulatePanic = () => {
+    if (travelers.length === 0) {
+      setSimulationLog('Sin activos reales en el sector para simular pánico SOS.');
+      return;
+    }
+    const target = travelers[0];
     setIsSimulating(true);
-    setSimulationLog('Simulando pulsación de BOTÓN DE PÁNICO por VIP-BRAVO...');
+    setSimulationLog(`Simulando pulsación de BOTÓN DE PÁNICO por ${target.callsign}...`);
 
     setTimeout(() => {
       setTravelers((prev) =>
         prev.map((t) =>
-          t.id === 't-02'
+          t.id === target.id
             ? { ...t, status: 'PANIC', lastPing: 'Ahora mismo' }
             : t
         )
       );
       onAlertTriggered?.(2);
-      setSimulationLog('🚨 SOS CRÍTICO: ¡Botón de pánico activado por VIP-BRAVO! Protocolo RSO activo.');
+      setSimulationLog(`🚨 SOS CRÍTICO: ¡Botón de pánico activado por ${target.callsign}! Protocolo RSO activo.`);
       setIsSimulating(false);
-      mapRef.current?.flyTo({ center: [-3.6920, 40.4220], zoom: 15.5, pitch: 40, duration: 1000 });
+      mapRef.current?.flyTo({ center: [target.lon, target.lat], zoom: 15.5, pitch: 40, duration: 1000 });
     }, 1000);
   };
 
@@ -576,8 +568,9 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
             <button
               type="button"
               onClick={handleSimulateIntrusion}
-              disabled={isSimulating}
-              className="btn btn-secondary text-xs flex items-center justify-center gap-1 py-1.5"
+              disabled={isSimulating || travelers.length === 0}
+              title={travelers.length === 0 ? 'Sin activos reales en el sector para simular' : 'Simular incursión en zona hostil'}
+              className="btn btn-secondary text-xs flex items-center justify-center gap-1 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <AlertTriangle className="w-3 h-3 text-[var(--risk-high)]" />
               <span>Incursión</span>
@@ -585,8 +578,9 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
             <button
               type="button"
               onClick={handleSimulatePanic}
-              disabled={isSimulating}
-              className="btn btn-secondary text-xs flex items-center justify-center gap-1 py-1.5 border-[var(--risk-crit)] text-[var(--risk-crit)]"
+              disabled={isSimulating || travelers.length === 0}
+              title={travelers.length === 0 ? 'Sin activos reales en el sector para simular' : 'Simular pánico de emergencia'}
+              className="btn btn-secondary text-xs flex items-center justify-center gap-1 py-1.5 border-[var(--risk-crit)] text-[var(--risk-crit)] disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Radio className="w-3 h-3 text-[var(--risk-crit)]" />
               <span>Pánico SOS</span>
@@ -598,45 +592,74 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
         <div className="p-3 border-b border-[var(--color-divider)]">
           <div className="flex items-center justify-between mb-2">
             <span className="kicker">En el Sector ({travelers.length})</span>
-            <span className="text-[10px] font-mono opacity-50">TELEMETRÍA</span>
-          </div>
-          <div className="divide-y divide-[color-mix(in_srgb,var(--color-text)_8%,transparent)]">
-            {travelers.map((t) => {
-              const isCrit = t.status === 'PANIC' || t.status === 'DANGER';
-              const isWarn = t.status === 'WARNING';
-              const tierColor = isCrit
-                ? 'var(--risk-crit)'
-                : isWarn
-                ? 'var(--risk-high)'
-                : 'var(--risk-stable)';
-
-              return (
-                <div
-                  key={t.id}
-                  onClick={() => handleSelectTraveler(t)}
-                  className="grid grid-cols-[3px_1fr_auto] gap-2.5 py-2 px-1 items-center cursor-pointer hover:bg-[color-mix(in_srgb,var(--color-text)_5%,transparent)] transition-colors"
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono opacity-50">TELEMETRÍA</span>
+              {canManageTravelers && onOpenCreateTraveler && (
+                <button
+                  type="button"
+                  onClick={onOpenCreateTraveler}
+                  className="text-[10px] font-heading font-semibold uppercase px-2 py-0.5 border border-[var(--color-accent)] text-[var(--color-accent)] hover:bg-[color-mix(in_srgb,var(--color-accent)_15%,transparent)] transition-colors cursor-pointer"
+                  title="Dar de alta nuevo convoy o viajero"
                 >
-                  <i className="self-stretch rounded-sm" style={{ backgroundColor: tierColor }} />
-                  <div>
-                    <strong className="text-xs font-semibold block">{t.callsign}</strong>
-                    <small className="text-[10px] opacity-60 block">{t.name}</small>
-                  </div>
-                  <div className="text-right">
-                    <span
-                      className="tag text-[9px]"
-                      style={{
-                        borderColor: tierColor,
-                        color: tierColor,
-                      }}
-                    >
-                      {t.status}
-                    </span>
-                    <span className="font-mono text-[9px] opacity-50 block mt-0.5">{t.battery}%</span>
-                  </div>
-                </div>
-              );
-            })}
+                  + ALTA
+                </button>
+              )}
+            </div>
           </div>
+          {isLoadingTravelers ? (
+            <div className="py-3 text-center text-xs font-mono opacity-50">Cargando el rebaño desde PostGIS...</div>
+          ) : travelers.length === 0 ? (
+            <div className="py-3 text-center text-xs opacity-60">
+              <span>No hay viajeros con coordenadas en el sector.</span>
+              {canManageTravelers && onOpenCreateTraveler && (
+                <button
+                  type="button"
+                  onClick={onOpenCreateTraveler}
+                  className="block mx-auto mt-1.5 text-xs font-heading font-semibold uppercase text-[var(--color-accent)] hover:underline cursor-pointer"
+                >
+                  + Añadir al rebaño
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y divide-[color-mix(in_srgb,var(--color-text)_8%,transparent)] max-h-56 overflow-y-auto">
+              {travelers.map((t) => {
+                const isCrit = t.status === 'PANIC' || t.status === 'DANGER';
+                const isWarn = t.status === 'WARNING';
+                const tierColor = isCrit
+                  ? 'var(--risk-crit)'
+                  : isWarn
+                  ? 'var(--risk-high)'
+                  : 'var(--risk-stable)';
+
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => handleSelectTraveler(t)}
+                    className="grid grid-cols-[3px_1fr_auto] gap-2.5 py-2 px-1 items-center cursor-pointer hover:bg-[color-mix(in_srgb,var(--color-text)_5%,transparent)] transition-colors"
+                  >
+                    <i className="self-stretch rounded-sm" style={{ backgroundColor: tierColor }} />
+                    <div>
+                      <strong className="text-xs font-semibold block">{t.callsign}</strong>
+                      <small className="text-[10px] opacity-60 block">{t.name}</small>
+                    </div>
+                    <div className="text-right">
+                      <span
+                        className="tag text-[9px]"
+                        style={{
+                          borderColor: tierColor,
+                          color: tierColor,
+                        }}
+                      >
+                        {t.status}
+                      </span>
+                      <span className="font-mono text-[9px] opacity-50 block mt-0.5">{t.battery}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Zonas y Perímetros Activos */}
@@ -775,7 +798,7 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
         {/* Mapa MapLibre GL */}
         <div ref={mapContainer} className="w-full h-full" />
 
-        {/* HUD Táctico Inferior */}
+        {/* HUD Táctico Inferior (Telemetría e Instrumentación WGS84 limpia) */}
         <TacticalHud
           cursorCoords={cursorCoords}
           centerCoords={centerCoords}
@@ -783,9 +806,6 @@ export const TerrenoScreen: React.FC<TerrenoScreenProps> = ({
           bearing={bearing}
           pitch={pitch}
           isHereActive={isHereConfigured}
-          onCenterFleet={handleCenterFleet}
-          onCenterRedZone={handleCenterRedZone}
-          onCenterSafeHaven={handleCenterSafeHaven}
         />
       </main>
     </div>

@@ -50,6 +50,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         status,
         last_latitude,
         last_longitude,
+        position_source,
         last_ping_at,
         battery_level,
         created_at,
@@ -182,6 +183,31 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       updates.user_id = body.user_id || null;
     }
 
+    // Reposicionamiento manual por el RSO (Decisión Daniel / Claude)
+    if (body.last_latitude !== undefined || body.last_longitude !== undefined) {
+      const lat = body.last_latitude;
+      const lon = body.last_longitude;
+      if (
+        typeof lat !== 'number' ||
+        typeof lon !== 'number' ||
+        isNaN(lat) ||
+        isNaN(lon) ||
+        lat < -90 ||
+        lat > 90 ||
+        lon < -180 ||
+        lon > 180
+      ) {
+        return NextResponse.json(
+          { error: 'Coordenadas geodésicas inválidas. last_latitude debe estar en [-90, 90] y last_longitude en [-180, 180].' },
+          { status: 400 }
+        );
+      }
+      updates.last_latitude = Number(lat);
+      updates.last_longitude = Number(lon);
+      updates.position_source = 'MANUAL_RSO';
+      updates.last_ping_at = new Date().toISOString();
+    }
+
     // 2. Rotación de Credencial de Hardware (Mandato Claude)
     let newRawSecret: string | null = null;
     const isRotating = body.rotate_device_secret === true;
@@ -208,6 +234,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         status,
         last_latitude,
         last_longitude,
+        position_source,
         last_ping_at,
         battery_level,
         created_at,

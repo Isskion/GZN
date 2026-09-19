@@ -85,6 +85,8 @@ export interface Profile {
   updated_at: string;
 }
 
+export type PositionSource = 'MANUAL_RSO' | 'DEVICE_TELEMETRY';
+
 export interface Traveler {
   id: string;
   organization_id: string;
@@ -97,6 +99,7 @@ export interface Traveler {
   status: TravelerStatus;
   last_latitude?: number | null;
   last_longitude?: number | null;
+  position_source?: PositionSource | null;
   last_ping_at?: string | null;
   battery_level?: number | null;
   device_secret_hash?: string | null;

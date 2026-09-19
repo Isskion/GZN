@@ -203,12 +203,13 @@ export async function processVerifiedTelemetry(
     }
   }
 
-  // 3. Actualizar posición y estado del viajero en Postgres
+  // 3. Actualizar posición y estado del viajero en Postgres con origen DEVICE_TELEMETRY (Decisión Daniel / Claude)
   await supabase
     .from('travelers')
     .update({
       last_latitude: latitude,
       last_longitude: longitude,
+      position_source: 'DEVICE_TELEMETRY',
       battery_level: batteryLevel !== undefined ? batteryLevel : null,
       status: newStatus,
       last_ping_at: new Date().toISOString(),

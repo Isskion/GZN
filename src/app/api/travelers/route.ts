@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
         status,
         last_latitude,
         last_longitude,
+        position_source,
         last_ping_at,
         battery_level,
         created_at,
@@ -133,6 +134,8 @@ export async function POST(request: NextRequest) {
       assigned_rso_id,
       user_id,
       generate_device_secret,
+      last_latitude,
+      last_longitude,
     } = body;
 
     // Validación de campos obligatorios
@@ -150,6 +153,37 @@ export async function POST(request: NextRequest) {
 
     if (user_id && !UUID_REGEX.test(user_id)) {
       return NextResponse.json({ error: 'user_id debe ser un UUID válido.' }, { status: 400 });
+    }
+
+    // Validación geodésica WGS84 para posición manual inicial (Decisión Daniel / Claude)
+    let validLat: number | null = null;
+    let validLon: number | null = null;
+    let positionSource: 'MANUAL_RSO' | null = null;
+    let lastPingAt: string | null = null;
+
+    const hasLat = last_latitude !== undefined && last_latitude !== null;
+    const hasLon = last_longitude !== undefined && last_longitude !== null;
+
+    if (hasLat || hasLon) {
+      if (
+        typeof last_latitude !== 'number' ||
+        typeof last_longitude !== 'number' ||
+        isNaN(last_latitude) ||
+        isNaN(last_longitude) ||
+        last_latitude < -90 ||
+        last_latitude > 90 ||
+        last_longitude < -180 ||
+        last_longitude > 180
+      ) {
+        return NextResponse.json(
+          { error: 'Coordenadas geodésicas inválidas. last_latitude debe estar en [-90, 90] y last_longitude en [-180, 180].' },
+          { status: 400 }
+        );
+      }
+      validLat = Number(last_latitude);
+      validLon = Number(last_longitude);
+      positionSource = 'MANUAL_RSO';
+      lastPingAt = new Date().toISOString();
     }
 
     // Enrolamiento Criptográfico de Hardware
@@ -175,6 +209,10 @@ export async function POST(request: NextRequest) {
         callsign: callsign ? String(callsign).trim() : null,
         status: 'SAFE',
         device_secret_hash: secretHash,
+        last_latitude: validLat,
+        last_longitude: validLon,
+        position_source: positionSource,
+        last_ping_at: lastPingAt,
       })
       .select(`
         id,
@@ -188,6 +226,7 @@ export async function POST(request: NextRequest) {
         status,
         last_latitude,
         last_longitude,
+        position_source,
         battery_level,
         created_at,
         updated_at
@@ -214,6 +253,8 @@ export async function POST(request: NextRequest) {
         phone: newTraveler.phone,
         assigned_rso_id: newTraveler.assigned_rso_id,
         device_enrolled: Boolean(secretHash),
+        position_source: newTraveler.position_source,
+        initial_coordinates: validLat !== null ? [validLon, validLat] : null,
       },
     });
 

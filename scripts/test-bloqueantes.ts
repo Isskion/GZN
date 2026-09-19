@@ -1388,6 +1388,116 @@ async function runTests() {
   assert(shellSrcContent.includes('if (zoneId) setFocusZoneId(zoneId);'), 'RsoConsoleShell.tsx actualiza focusZoneId al ampliar');
   assert(shellSrcContent.includes("setActiveScreen('terreno');"), 'RsoConsoleShell.tsx navega a terreno al ampliar');
 
+  // ----------------------------------------------------------------------------
+  // 20. Herramientas de Terreno, Alta de Rebaño y Unificación de Botón Flotante "G"
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 20. Herramientas de Terreno, Alta de Rebaño y Unificación de Botón Flotante "G" ---');
+
+  // 1. Migración SQL 012 (Decisión Daniel / Claude)
+  const migration012Path = path.resolve(process.cwd(), 'sql/012_traveler_manual_position_source.sql');
+  assert(fs.existsSync(migration012Path), 'Migración sql/012_traveler_manual_position_source.sql existe');
+  const migration012Content = fs.readFileSync(migration012Path, 'utf8');
+  assert(migration012Content.includes('ADD COLUMN IF NOT EXISTS position_source TEXT'), '012 define columna position_source en travelers');
+  assert(migration012Content.includes("CHECK (position_source IS NULL OR position_source IN ('MANUAL_RSO', 'DEVICE_TELEMETRY'))"), '012 incluye CHECK estricto de origen de posición (MANUAL_RSO vs DEVICE_TELEMETRY)');
+  assert(migration012Content.includes('idx_travelers_position_source'), '012 crea índice idx_travelers_position_source');
+
+  // 2. Definición de Tipos en src/types/database.ts
+  const dbTypesPath = path.resolve(process.cwd(), 'src/types/database.ts');
+  const dbTypesContent = fs.readFileSync(dbTypesPath, 'utf8');
+  assert(dbTypesContent.includes("export type PositionSource = 'MANUAL_RSO' | 'DEVICE_TELEMETRY';"), 'database.ts exporta tipo canónico PositionSource');
+  assert(dbTypesContent.includes('position_source?: PositionSource | null;'), 'Interface Traveler incluye position_source opcional');
+
+  // 3. API POST /api/travelers y PATCH /api/travelers/[id]
+  const apiTravelersPath = path.resolve(process.cwd(), 'src/app/api/travelers/route.ts');
+  const apiTravelersContent = fs.readFileSync(apiTravelersPath, 'utf8');
+  assert(apiTravelersContent.includes('position_source'), 'GET /api/travelers proyecta position_source');
+  assert(apiTravelersContent.includes("positionSource = 'MANUAL_RSO'") && apiTravelersContent.includes('position_source: positionSource'), 'POST /api/travelers marca posición opcional como MANUAL_RSO');
+  assert(apiTravelersContent.includes('last_latitude < -90') && apiTravelersContent.includes('last_latitude > 90'), 'POST /api/travelers valida rango WGS84 latitud');
+  assert(apiTravelersContent.includes('last_longitude < -180') && apiTravelersContent.includes('last_longitude > 180'), 'POST /api/travelers valida rango WGS84 longitud');
+  assert(apiTravelersContent.includes('position_source: newTraveler.position_source'), 'POST /api/travelers audita origen de coordenadas en audit_logs');
+
+  const apiTravelersIdPath = path.resolve(process.cwd(), 'src/app/api/travelers/[id]/route.ts');
+  const apiTravelersIdContent = fs.readFileSync(apiTravelersIdPath, 'utf8');
+  assert(apiTravelersIdContent.includes('position_source'), 'GET /api/travelers/[id] proyecta position_source');
+  assert(apiTravelersIdContent.includes("updates.position_source = 'MANUAL_RSO'"), 'PATCH /api/travelers/[id] marca relocalización manual como MANUAL_RSO');
+  assert(apiTravelersIdContent.includes('last_latitude') && apiTravelersIdContent.includes('last_longitude'), 'PATCH /api/travelers/[id] admite actualización de coordenadas WGS84');
+  assert(apiTravelersIdContent.includes('body.status !== undefined'), 'PATCH /api/travelers/[id] preserva invariante ADR-010 / B1 (status inmutable por PATCH)');
+
+  // 4. Telemetría de Dispositivos Reales (device.ts)
+  const deviceLibPath = path.resolve(process.cwd(), 'src/lib/auth/device.ts');
+  const deviceLibContent = fs.readFileSync(deviceLibPath, 'utf8');
+  assert(deviceLibContent.includes("position_source: 'DEVICE_TELEMETRY'"), 'processVerifiedTelemetry marca telemetría verificada como DEVICE_TELEMETRY');
+
+  // 5. Limpieza de datos estáticos en TerrenoScreen.tsx
+  const flockTerrenoContent = fs.readFileSync(terrenoPath, 'utf8');
+  assert(!flockTerrenoContent.includes("id: 't-01'"), 'TerrenoScreen.tsx eliminó convoy alfa (t-01)');
+  assert(!flockTerrenoContent.includes("id: 't-02'"), 'TerrenoScreen.tsx eliminó vip-bravo (t-02)');
+  assert(!flockTerrenoContent.includes("id: 't-03'"), 'TerrenoScreen.tsx eliminó log charlie (t-03)');
+  assert(!flockTerrenoContent.includes("'red-zone'"), 'TerrenoScreen.tsx eliminó capa hardcodeada red-zone');
+  assert(!flockTerrenoContent.includes("'safe-haven'"), 'TerrenoScreen.tsx eliminó capa hardcodeada safe-haven');
+  assert(flockTerrenoContent.includes('/api/travelers?limit=100'), 'TerrenoScreen.tsx carga viajeros dinámicamente desde /api/travelers');
+  assert(flockTerrenoContent.includes('handleCenterFleet'), 'TerrenoScreen.tsx implementa centrado dinámico de flota con fitBounds');
+  assert(flockTerrenoContent.includes('handleCenterRedZone') && flockTerrenoContent.includes('handleCenterSafeHaven'), 'TerrenoScreen.tsx implementa navegación dinámica a zonas críticas y safe havens');
+  assert(flockTerrenoContent.includes('onOpenCreateTraveler'), 'TerrenoScreen.tsx admite prop onOpenCreateTraveler');
+  assert(flockTerrenoContent.includes('+ ALTA'), 'TerrenoScreen.tsx incluye botón + ALTA en la cabecera de viajeros');
+
+  // 6. Eliminación de colisión y corrección cardinal en TacticalHud.tsx (Corrección Claude 1)
+  const hudPath = path.resolve(process.cwd(), 'src/components/map/TacticalHud.tsx');
+  const hudContent = fs.readFileSync(hudPath, 'utf8');
+  assert(!hudContent.includes('onCenterFleet'), 'TacticalHud.tsx no contiene prop onCenterFleet');
+  assert(!hudContent.includes('onCenterRedZone'), 'TacticalHud.tsx no contiene prop onCenterRedZone');
+  assert(!hudContent.includes('onCenterSafeHaven'), 'TacticalHud.tsx no contiene prop onCenterSafeHaven');
+  assert(!hudContent.includes('El Rebaño'), 'TacticalHud.tsx eliminó botón superpuesto El Rebaño');
+  assert(!hudContent.includes('Zona Roja'), 'TacticalHud.tsx eliminó botón superpuesto Zona Roja');
+  assert(!hudContent.includes('Safe Haven'), 'TacticalHud.tsx eliminó botón superpuesto Safe Haven');
+
+  // Pruebas unitarias completas de los 8 rumbos cardinales (Corrección Claude 1)
+  const { getCardinalDirection } = await import('../src/components/map/TacticalHud');
+  assert(getCardinalDirection(0) === 'N', 'getCardinalDirection(0) devuelve N');
+  assert(getCardinalDirection(45) === 'NE', 'getCardinalDirection(45) devuelve NE');
+  assert(getCardinalDirection(90) === 'E', 'getCardinalDirection(90) devuelve E');
+  assert(getCardinalDirection(135) === 'SE', 'getCardinalDirection(135) devuelve SE');
+  assert(getCardinalDirection(180) === 'S', 'getCardinalDirection(180) devuelve S (Corrección Claude 1 restaurada)');
+  assert(getCardinalDirection(225) === 'SW', 'getCardinalDirection(225) devuelve SW');
+  assert(getCardinalDirection(270) === 'W', 'getCardinalDirection(270) devuelve W');
+  assert(getCardinalDirection(315) === 'NW', 'getCardinalDirection(315) devuelve NW');
+
+  // 7. Componente TravelerCreationModal.tsx (Corrección Claude 2)
+  const travelerModalPath = path.resolve(process.cwd(), 'src/components/tactical/TravelerCreationModal.tsx');
+  assert(fs.existsSync(travelerModalPath), 'TravelerCreationModal.tsx existe en src/components/tactical/');
+  const travelerModalContent = fs.readFileSync(travelerModalPath, 'utf8');
+  assert(travelerModalContent.includes('export const TravelerCreationModal'), 'TravelerCreationModal.tsx exporta el componente TravelerCreationModal');
+  assert(travelerModalContent.includes('POST') && travelerModalContent.includes('/api/travelers'), 'TravelerCreationModal.tsx realiza POST a /api/travelers');
+  assert(travelerModalContent.includes('usePosition'), 'TravelerCreationModal.tsx implementa selección de posición opcional');
+  assert(travelerModalContent.includes('MANUAL_RSO'), 'TravelerCreationModal.tsx informa el origen MANUAL_RSO en su interfaz');
+  assert(!travelerModalContent.includes('40.4168') && !travelerModalContent.includes('-3.7038'), 'TravelerCreationModal.tsx no contiene coordenadas hardcodeadas de Madrid (Corrección Claude 2)');
+  assert(!travelerModalContent.includes('onRequestPickOnMap'), 'TravelerCreationModal.tsx retiró prop/botón de UI muerta onRequestPickOnMap (Corrección Claude 2)');
+
+  // 8. Unificación en FloatingRsoButton.tsx
+  const floatingBtnPath = path.resolve(process.cwd(), 'src/components/industry/FloatingRsoButton.tsx');
+  const floatingBtnContent = fs.readFileSync(floatingBtnPath, 'utf8');
+  assert(floatingBtnContent.includes('onOpenCreateZone?: () => void;'), 'FloatingRsoButtonProps incluye onOpenCreateZone');
+  assert(floatingBtnContent.includes('onOpenCreateTraveler?: () => void;'), 'FloatingRsoButtonProps incluye onOpenCreateTraveler');
+  assert(floatingBtnContent.includes('onCenterFleet?: () => void;'), 'FloatingRsoButtonProps incluye onCenterFleet');
+  assert(floatingBtnContent.includes('onCenterRedZone?: () => void;'), 'FloatingRsoButtonProps incluye onCenterRedZone');
+  assert(floatingBtnContent.includes('onCenterSafeHaven?: () => void;'), 'FloatingRsoButtonProps incluye onCenterSafeHaven');
+  assert(floatingBtnContent.includes('Pintar Zona Táctica'), 'FloatingRsoButton.tsx ofrece acción Pintar Zona Táctica');
+  assert(floatingBtnContent.includes('Añadir al Rebaño'), 'FloatingRsoButton.tsx ofrece acción Añadir al Rebaño');
+  assert(floatingBtnContent.includes('Centrar El Rebaño'), 'FloatingRsoButton.tsx ofrece navegación Centrar El Rebaño');
+  assert(floatingBtnContent.includes('Zona Crítica'), 'FloatingRsoButton.tsx ofrece navegación Zona Crítica');
+  assert(floatingBtnContent.includes('Safe Haven'), 'FloatingRsoButton.tsx ofrece navegación Safe Haven');
+
+  // 9. Integración en RsoConsoleShell.tsx y flujo de centro real del visor (Corrección Claude 2)
+  const updatedShellContent = fs.readFileSync(shellSrcPath, 'utf8');
+  assert(updatedShellContent.includes('TravelerCreationModal'), 'RsoConsoleShell.tsx importa TravelerCreationModal');
+  assert(updatedShellContent.includes('isCreateTravelerModalOpen'), 'RsoConsoleShell.tsx gestiona estado isCreateTravelerModalOpen');
+  assert(updatedShellContent.includes('terrainNavHandlers'), 'RsoConsoleShell.tsx gestiona handlers de navegación de terreno');
+  assert(updatedShellContent.includes('onRegisterNavigationHandlers={(handlers) => setTerrainNavHandlers(handlers)}'), 'RsoConsoleShell.tsx registra handlers de navegación desde TerrenoScreen');
+  assert(flockTerrenoContent.includes('getMapCenter'), 'TerrenoScreen.tsx provee getMapCenter en onRegisterNavigationHandlers');
+  assert(updatedShellContent.includes('terrainNavHandlers.getMapCenter'), 'RsoConsoleShell.tsx invoca getMapCenter antes de abrir el modal de alta');
+  assert(updatedShellContent.includes('initialCoordinates={createTravelerInitialCoords}'), 'RsoConsoleShell.tsx pasa las coordenadas reales del visor como initialCoordinates');
+  assert(updatedShellContent.includes('canManageTravelers'), 'RsoConsoleShell.tsx define y aplica control RBAC canManageTravelers');
+
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);
   console.log('================================================================\n');

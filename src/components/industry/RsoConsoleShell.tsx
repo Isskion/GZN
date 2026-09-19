@@ -14,6 +14,7 @@ import { IncidentModal } from '@/components/industry/IncidentModal';
 import { IncidentItem } from '@/components/industry/IncidentTape';
 import { Profile, ROLE_LEVELS, UserRole } from '@/types/database';
 import { ZoneCreationModal } from '@/components/tactical/ZoneCreationModal';
+import { TravelerCreationModal } from '@/components/tactical/TravelerCreationModal';
 
 interface RsoConsoleShellProps {
   user?: { id: string; email?: string } | null;
@@ -25,13 +26,22 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
   const [alertsCount, setAlertsCount] = useState<number>(1);
   const [activeIncidentModal, setActiveIncidentModal] = useState<IncidentItem | null>(null);
   const [isCreateZoneModalOpen, setIsCreateZoneModalOpen] = useState(false);
+  const [isCreateTravelerModalOpen, setIsCreateTravelerModalOpen] = useState(false);
+  const [createTravelerInitialCoords, setCreateTravelerInitialCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [editingZone, setEditingZone] = useState<any | null>(null);
   const [refreshZonesCounter, setRefreshZonesCounter] = useState(0);
   const [focusZoneId, setFocusZoneId] = useState<string | null>(null);
+  const [terrainNavHandlers, setTerrainNavHandlers] = useState<{
+    centerFleet?: () => void;
+    centerRedZone?: () => void;
+    centerSafeHaven?: () => void;
+    getMapCenter?: () => { lat: number; lon: number };
+  }>({});
 
   // Control RBAC: role_level >= 60 (RSO, CONTROL_TOWER, ORG_ADMIN)
   const roleLevel = profile?.role_level ?? (profile?.role ? ROLE_LEVELS[profile.role as keyof typeof ROLE_LEVELS] : 40);
   const canManageZones = roleLevel >= 60;
+  const canManageTravelers = roleLevel >= 60;
 
   const screenTitles: Record<ScreenId, string> = {
     terreno: 'Terreno / Sector Táctico',
@@ -61,6 +71,15 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
 
   const handleEditZone = (zone: any) => {
     setEditingZone(zone);
+  };
+
+  const handleOpenCreateTraveler = () => {
+    if (terrainNavHandlers.getMapCenter) {
+      setCreateTravelerInitialCoords(terrainNavHandlers.getMapCenter());
+    } else {
+      setCreateTravelerInitialCoords(null);
+    }
+    setIsCreateTravelerModalOpen(true);
   };
 
   return (
@@ -95,14 +114,17 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
             <TerrenoScreen
               onAlertTriggered={(count) => setAlertsCount(count)}
               canManageZones={canManageZones}
+              canManageTravelers={canManageTravelers}
               onOpenCreateZone={() => {
                 setEditingZone(null);
                 setIsCreateZoneModalOpen(true);
               }}
+              onOpenCreateTraveler={canManageTravelers ? handleOpenCreateTraveler : undefined}
               onEditZone={handleEditZone}
               refreshTrigger={refreshZonesCounter}
               focusZoneId={focusZoneId}
               onFocusZoneConsumed={() => setFocusZoneId(null)}
+              onRegisterNavigationHandlers={(handlers) => setTerrainNavHandlers(handlers)}
             />
           )}
           {activeScreen === 'zonas' && (
@@ -134,12 +156,21 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
         </div>
       </div>
 
-      {/* Botón Flotante de Acción Rápida RSO */}
+      {/* Botón Flotante de Acción Rápida RSO con herramientas y navegación integradas */}
       <FloatingRsoButton
         onNavigateScreen={setActiveScreen}
         onSimulatePing={() => {
           setAlertsCount((prev) => prev);
         }}
+        onOpenCreateZone={canManageZones ? () => {
+          setEditingZone(null);
+          setIsCreateZoneModalOpen(true);
+        } : undefined}
+        onOpenCreateTraveler={canManageTravelers ? handleOpenCreateTraveler : undefined}
+        onCenterFleet={terrainNavHandlers.centerFleet}
+        onCenterRedZone={terrainNavHandlers.centerRedZone}
+        onCenterSafeHaven={terrainNavHandlers.centerSafeHaven}
+        isTerrenoActive={activeScreen === 'terreno'}
       />
 
       {/* Modal de Triaje y Protocolo Táctico de Incidentes */}
@@ -159,6 +190,23 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
             setEditingZone(null);
           }}
           onZoneCreated={handleZoneCreated}
+        />
+      )}
+
+      {/* Modal Táctico de Alta de Viajeros / Rebaño con posición inicial del visor */}
+      {isCreateTravelerModalOpen && (
+        <TravelerCreationModal
+          isOpen={isCreateTravelerModalOpen}
+          initialCoordinates={createTravelerInitialCoords}
+          onClose={() => {
+            setIsCreateTravelerModalOpen(false);
+            setCreateTravelerInitialCoords(null);
+          }}
+          onTravelerCreated={() => {
+            setRefreshZonesCounter((prev) => prev + 1);
+            setIsCreateTravelerModalOpen(false);
+            setCreateTravelerInitialCoords(null);
+          }}
         />
       )}
     </div>

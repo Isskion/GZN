@@ -2,35 +2,62 @@
 
 import React, { useState } from 'react';
 import {
-  Plus,
   Shield,
   MapPin,
   FileText,
   Radio,
   X,
   Compass,
+  Layers,
+  UserPlus,
+  Crosshair,
+  ShieldAlert,
+  Home,
+  Users,
 } from 'lucide-react';
 import { ScreenId } from '@/components/industry/ConsoleRail';
 
-interface FloatingRsoButtonProps {
+export interface FloatingRsoButtonProps {
   onNavigateScreen: (screen: ScreenId) => void;
   onSimulatePing?: () => void;
+  onOpenCreateZone?: () => void;
+  onOpenCreateTraveler?: () => void;
+  onCenterFleet?: () => void;
+  onCenterRedZone?: () => void;
+  onCenterSafeHaven?: () => void;
+  isTerrenoActive?: boolean;
 }
 
 export const FloatingRsoButton: React.FC<FloatingRsoButtonProps> = ({
   onNavigateScreen,
   onSimulatePing,
+  onOpenCreateZone,
+  onOpenCreateTraveler,
+  onCenterFleet,
+  onCenterRedZone,
+  onCenterSafeHaven,
+  isTerrenoActive = true,
 }) => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
-  const handleAction = (label: string, actionFn: () => void) => {
+  const handleAction = (label: string, actionFn?: () => void) => {
+    if (!actionFn) return;
     actionFn();
     setActionFeedback(label);
     setTimeout(() => {
       setActionFeedback(null);
       setIsOpen(false);
     }, 1400);
+  };
+
+  const handleTerrainNav = (label: string, navFn?: () => void) => {
+    if (!isTerrenoActive) {
+      onNavigateScreen('terreno');
+    }
+    handleAction(label, () => {
+      navFn?.();
+    });
   };
 
   return (
@@ -49,7 +76,7 @@ export const FloatingRsoButton: React.FC<FloatingRsoButtonProps> = ({
             className="fixed inset-0 z-30"
             onClick={() => setIsOpen(false)}
           />
-          <div className="blueprint plate relative z-40 mb-3 w-64 bg-[var(--color-surface)] border border-[var(--color-divider)] rounded-[var(--radius-sm)] shadow-[var(--shadow-lg)] p-3 text-xs text-[var(--color-text)] animate-in fade-in zoom-in-95 duration-150">
+          <div className="blueprint plate relative z-40 mb-3 w-72 bg-[var(--color-surface)] border border-[var(--color-divider)] rounded-[var(--radius-sm)] shadow-[var(--shadow-lg)] p-3 text-xs text-[var(--color-text)] animate-in fade-in zoom-in-95 duration-150 max-h-[85vh] overflow-y-auto">
             <i className="corner tl" />
             <i className="corner tr" />
             <i className="corner bl" />
@@ -70,23 +97,120 @@ export const FloatingRsoButton: React.FC<FloatingRsoButtonProps> = ({
             </div>
 
             <div className="flex flex-col gap-1">
+              {/* Sección 1: Despliegue Táctico */}
+              {(onOpenCreateZone || onOpenCreateTraveler) && (
+                <>
+                  <div className="text-[10px] font-mono uppercase text-[var(--color-accent)] font-semibold tracking-wider px-1 py-0.5">
+                    Despliegue Táctico
+                  </div>
+                  {onOpenCreateZone && (
+                    <button
+                      type="button"
+                      onClick={() => handleAction('Delimitador de Zonas', onOpenCreateZone)}
+                      className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)] text-left transition-colors w-full"
+                    >
+                      <div className="w-6 h-6 rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] text-[var(--color-accent)] flex items-center justify-center flex-none">
+                        <Layers className="w-3.5 h-3.5" />
+                      </div>
+                      <div>
+                        <div className="font-heading font-semibold text-xs uppercase text-[var(--color-accent)]">Pintar Zona Táctica</div>
+                        <div className="text-[10px] opacity-60">Delimitar perímetro o radio en mapa</div>
+                      </div>
+                    </button>
+                  )}
+                  {onOpenCreateTraveler && (
+                    <button
+                      type="button"
+                      onClick={() => handleAction('Alta de Viajero / Convoy', onOpenCreateTraveler)}
+                      className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)] text-left transition-colors w-full"
+                    >
+                      <div className="w-6 h-6 rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] text-[var(--color-accent)] flex items-center justify-center flex-none">
+                        <UserPlus className="w-3.5 h-3.5" />
+                      </div>
+                      <div>
+                        <div className="font-heading font-semibold text-xs uppercase text-[var(--color-accent)]">Añadir al Rebaño</div>
+                        <div className="text-[10px] opacity-60">Nuevo convoy o viajero en sector</div>
+                      </div>
+                    </button>
+                  )}
+                  <div className="my-1 border-t border-[var(--color-divider)]" />
+                </>
+              )}
+
+              {/* Sección 2: Navegación en Terreno (Opciones integradas del HUD) */}
+              <div className="text-[10px] font-mono uppercase text-[var(--color-muted)] font-semibold tracking-wider px-1 py-0.5">
+                Navegación Terreno
+              </div>
               <button
                 type="button"
-                onClick={() =>
-                  handleAction('Navegando a Terreno Operativo', () =>
-                    onNavigateScreen('terreno')
-                  )
-                }
-                className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--color-text)_6%,transparent)] text-left transition-colors"
+                onClick={() => handleTerrainNav('Enfocando El Rebaño', onCenterFleet)}
+                disabled={!onCenterFleet}
+                className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--color-text)_6%,transparent)] text-left transition-colors w-full disabled:opacity-40"
               >
-                <div className="w-6 h-6 rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] text-[var(--color-accent)] flex items-center justify-center flex-none">
-                  <MapPin className="w-3.5 h-3.5" />
+                <div className="w-6 h-6 rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--color-text)_10%,transparent)] text-[var(--color-text)] flex items-center justify-center flex-none">
+                  <Crosshair className="w-3.5 h-3.5" />
                 </div>
                 <div>
-                  <div className="font-heading font-semibold text-xs uppercase">Ver Terreno</div>
-                  <div className="text-[10px] opacity-60">Centrar cartografía táctica</div>
+                  <div className="font-heading font-semibold text-xs uppercase">Centrar El Rebaño</div>
+                  <div className="text-[10px] opacity-60">Ajustar encuadre a viajeros activos</div>
                 </div>
               </button>
+
+              <button
+                type="button"
+                onClick={() => handleTerrainNav('Enfocando Zona Crítica', onCenterRedZone)}
+                disabled={!onCenterRedZone}
+                className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--risk-crit)_10%,transparent)] text-left transition-colors w-full disabled:opacity-40"
+              >
+                <div className="w-6 h-6 rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--risk-crit)_15%,transparent)] text-[var(--risk-crit)] flex items-center justify-center flex-none">
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="font-heading font-semibold text-xs uppercase text-[var(--risk-crit)]">Zona Crítica</div>
+                  <div className="text-[10px] opacity-60">Salto táctico a sector hostil</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleTerrainNav('Enfocando Safe Haven', onCenterSafeHaven)}
+                disabled={!onCenterSafeHaven}
+                className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--risk-stable)_10%,transparent)] text-left transition-colors w-full disabled:opacity-40"
+              >
+                <div className="w-6 h-6 rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--risk-stable)_15%,transparent)] text-[var(--risk-stable)] flex items-center justify-center flex-none">
+                  <Home className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="font-heading font-semibold text-xs uppercase text-[var(--risk-stable)]">Safe Haven</div>
+                  <div className="text-[10px] opacity-60">Salto táctico a refugio seguro</div>
+                </div>
+              </button>
+
+              <div className="my-1 border-t border-[var(--color-divider)]" />
+
+              {/* Sección 3: Consola y Pantallas */}
+              <div className="text-[10px] font-mono uppercase text-[var(--color-muted)] font-semibold tracking-wider px-1 py-0.5">
+                Consola RSO
+              </div>
+              {!isTerrenoActive && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleAction('Navegando a Terreno Operativo', () =>
+                      onNavigateScreen('terreno')
+                    )
+                  }
+                  className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--color-text)_6%,transparent)] text-left transition-colors w-full"
+                >
+                  <div className="w-6 h-6 rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] text-[var(--color-accent)] flex items-center justify-center flex-none">
+                    <MapPin className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="font-heading font-semibold text-xs uppercase">Ver Terreno</div>
+                    <div className="text-[10px] opacity-60">Cartografía táctica principal</div>
+                  </div>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -95,7 +219,7 @@ export const FloatingRsoButton: React.FC<FloatingRsoButtonProps> = ({
                     onNavigateScreen('briefings')
                   )
                 }
-                className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--color-text)_6%,transparent)] text-left transition-colors"
+                className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--color-text)_6%,transparent)] text-left transition-colors w-full"
               >
                 <div className="w-6 h-6 rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--risk-stable)_14%,transparent)] text-[var(--risk-stable)] flex items-center justify-center flex-none">
                   <FileText className="w-3.5 h-3.5" />
@@ -113,10 +237,10 @@ export const FloatingRsoButton: React.FC<FloatingRsoButtonProps> = ({
                     onNavigateScreen('personas')
                   )
                 }
-                className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--color-text)_6%,transparent)] text-left transition-colors"
+                className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--color-text)_10%,transparent)] text-left transition-colors w-full"
               >
                 <div className="w-6 h-6 rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--color-text)_10%,transparent)] text-[var(--color-text)] flex items-center justify-center flex-none">
-                  <Shield className="w-3.5 h-3.5" />
+                  <Users className="w-3.5 h-3.5" />
                 </div>
                 <div>
                   <div className="font-heading font-semibold text-xs uppercase">Cartera Personal</div>
@@ -133,7 +257,7 @@ export const FloatingRsoButton: React.FC<FloatingRsoButtonProps> = ({
                     onSimulatePing?.()
                   )
                 }
-                className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--risk-watch)_10%,transparent)] text-left transition-colors text-[var(--risk-watch)]"
+                className="flex items-center gap-2.5 p-2 rounded-[var(--radius-sm)] hover:bg-[color-mix(in_srgb,var(--risk-watch)_10%,transparent)] text-left transition-colors text-[var(--risk-watch)] w-full"
               >
                 <div className="w-6 h-6 rounded-[var(--radius-sm)] bg-[color-mix(in_srgb,var(--risk-watch)_15%,transparent)] text-[var(--risk-watch)] flex items-center justify-center flex-none">
                   <Radio className="w-3.5 h-3.5" />
