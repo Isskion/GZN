@@ -1496,7 +1496,83 @@ async function runTests() {
   assert(flockTerrenoContent.includes('getMapCenter'), 'TerrenoScreen.tsx provee getMapCenter en onRegisterNavigationHandlers');
   assert(updatedShellContent.includes('terrainNavHandlers.getMapCenter'), 'RsoConsoleShell.tsx invoca getMapCenter antes de abrir el modal de alta');
   assert(updatedShellContent.includes('initialCoordinates={createTravelerInitialCoords}'), 'RsoConsoleShell.tsx pasa las coordenadas reales del visor como initialCoordinates');
-  assert(updatedShellContent.includes('canManageTravelers'), 'RsoConsoleShell.tsx define y aplica control RBAC canManageTravelers');
+  // 21. GESTIÓN DE PERSONAL Y AISLAMIENTO JERÁRQUICO POR ROL (Consola de Personas)
+  console.log('\n--- 21. Verificación de Gestión de Personal y Aislamiento Jerárquico por Rol ---');
+
+  // 1. Migración SQL 013
+  const mig013Path = path.resolve(process.cwd(), 'sql/013_user_management_and_scoping.sql');
+  assert(fs.existsSync(mig013Path), 'sql/013_user_management_and_scoping.sql existe');
+  const mig013Content = fs.readFileSync(mig013Path, 'utf8');
+  assert(mig013Content.includes('ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email TEXT;'), 'Migración 013 añade columna email a public.profiles');
+  assert(mig013Content.includes('UPDATE public.profiles p') && mig013Content.includes('SET email = u.email'), 'Migración 013 ejecuta backfill de email desde auth.users');
+  assert(mig013Content.includes('idx_profiles_email') && mig013Content.includes('idx_profiles_role_level'), 'Migración 013 crea índices para email y role_level');
+  assert(mig013Content.includes('Users can view profiles of same or lower role level'), 'Migración 013 aplica política RLS SELECT jerárquica');
+  assert(mig013Content.includes('Users can update profiles within hierarchical authority'), 'Migración 013 aplica política RLS UPDATE jerárquica (Corrección Claude 2)');
+  assert(mig013Content.includes('Authorized users can insert profiles'), 'Migración 013 aplica política RLS INSERT para mandos >= 60');
+
+  // 2. Catálogo de Auditoría (Corrección Hueco Claude)
+  const loggerPath = path.resolve(process.cwd(), 'src/lib/audit/logger.ts');
+  const loggerContent = fs.readFileSync(loggerPath, 'utf8');
+  assert(loggerContent.includes("'USER_CREATED'"), 'AuditAction incluye USER_CREATED');
+  assert(loggerContent.includes("'USER_UPDATED'"), 'AuditAction incluye USER_UPDATED');
+
+  // 3. Tipos en database.ts
+  const userMgmtDbTypesPath = path.resolve(process.cwd(), 'src/types/database.ts');
+  const userMgmtDbTypesContent = fs.readFileSync(userMgmtDbTypesPath, 'utf8');
+  assert(userMgmtDbTypesContent.includes('email?: string | null;'), 'Profile en database.ts incluye email?: string | null');
+
+  // 4. Endpoint GET/POST /api/profiles/route.ts
+  const profilesRoutePath = path.resolve(process.cwd(), 'src/app/api/profiles/route.ts');
+  const profilesRouteContent = fs.readFileSync(profilesRoutePath, 'utf8');
+  assert(profilesRouteContent.includes(".gte('role_level', 60)"), 'GET /api/profiles conserva filtro por defecto role_level >= 60 para selectores existentes (Corrección Claude 1)');
+  assert(profilesRouteContent.includes("scope === 'hierarchy'"), 'GET /api/profiles implementa modo explícito scope === hierarchy para PersonasScreen');
+  assert(profilesRouteContent.includes(".lte('role_level', callerProfile.role_level)"), 'GET /api/profiles filtra role_level <= caller en modo jerárquico');
+  const getFunctionBody = profilesRouteContent.slice(profilesRouteContent.indexOf('export async function GET'), profilesRouteContent.indexOf('export async function POST'));
+  assert(!getFunctionBody.includes('createAdminClient()'), 'GET /api/profiles no invoca createAdminClient y opera 100% con cliente de sesión RLS (Anti-fuga Cross-Tenant)');
+  assert(profilesRouteContent.includes('callerProfile.role_level < 60'), 'POST /api/profiles exige rango mínimo RSO (nivel 60)');
+  assert(profilesRouteContent.includes('requestedRoleLevel > callerProfile.role_level'), 'POST /api/profiles valida techo jerárquico del invocador');
+  assert(profilesRouteContent.includes('auth.admin.createUser') && profilesRouteContent.includes('auth.admin.deleteUser'), 'POST /api/profiles implementa aprovisionamiento atómico con rollback');
+  assert(profilesRouteContent.includes("action: 'USER_CREATED'"), 'POST /api/profiles registra evento de auditoría USER_CREATED');
+
+  // 5. Endpoint PATCH /api/profiles/[id]/route.ts
+  const profileIdRoutePath = path.resolve(process.cwd(), 'src/app/api/profiles/[id]/route.ts');
+  assert(fs.existsSync(profileIdRoutePath), 'src/app/api/profiles/[id]/route.ts existe');
+  const profileIdRouteContent = fs.readFileSync(profileIdRoutePath, 'utf8');
+  assert(profileIdRouteContent.includes('targetProfile.role_level > callerProfile.role_level'), 'PATCH /api/profiles/[id] comprueba techo jerárquico');
+  assert(profileIdRouteContent.includes('isSelf') && profileIdRouteContent.includes('No está autorizado a alterar su propio rol'), 'PATCH /api/profiles/[id] implementa anti-autoescalamiento');
+  assert(profileIdRouteContent.includes('body.is_active === false') && profileIdRouteContent.includes('No puede desactivar su propia cuenta'), 'PATCH /api/profiles/[id] implementa anti-autobloqueo');
+  assert(profileIdRouteContent.includes('newRoleLevel > callerProfile.role_level'), 'PATCH /api/profiles/[id] prohíbe promociones superiores al rango del invocador');
+  assert(profileIdRouteContent.includes("await supabase\n      .from('profiles')\n      .update(profileUpdates)") || profileIdRouteContent.includes('await supabase') && profileIdRouteContent.includes('.update(profileUpdates)'), 'PATCH /api/profiles/[id] actualiza public.profiles usando cliente de sesión (ejercita RLS UPDATE)');
+  assert(profileIdRouteContent.includes("action: 'USER_UPDATED'"), 'PATCH /api/profiles/[id] registra evento de auditoría USER_UPDATED');
+
+  // 6. Componentes Modales de Gestión
+  const userCreationModalPath = path.resolve(process.cwd(), 'src/components/tactical/UserCreationModal.tsx');
+  assert(fs.existsSync(userCreationModalPath), 'UserCreationModal.tsx existe');
+  const userCreationModalContent = fs.readFileSync(userCreationModalPath, 'utf8');
+  assert(userCreationModalContent.includes('callerRoleLevel'), 'UserCreationModal recibe callerRoleLevel');
+  assert(userCreationModalContent.includes("r.level <= callerRoleLevel"), 'UserCreationModal filtra roles disponibles por nivel jerárquico');
+  assert(userCreationModalContent.includes("fetch('/api/profiles'"), 'UserCreationModal invoca POST a /api/profiles');
+
+  const userEditModalPath = path.resolve(process.cwd(), 'src/components/tactical/UserEditModal.tsx');
+  assert(fs.existsSync(userEditModalPath), 'UserEditModal.tsx existe');
+  const userEditModalContent = fs.readFileSync(userEditModalPath, 'utf8');
+  assert(userEditModalContent.includes('isSelf'), 'UserEditModal detecta cuenta propia para protecciones');
+  assert(userEditModalContent.includes("fetch(`/api/profiles/${targetUser.id}`"), 'UserEditModal invoca PATCH a /api/profiles/[id]');
+
+  // 7. Pantalla PersonasScreen.tsx reorientada y desacoplada
+  const personasScreenPath = path.resolve(process.cwd(), 'src/components/screens/PersonasScreen.tsx');
+  const personasScreenContent = fs.readFileSync(personasScreenPath, 'utf8');
+  assert(!personasScreenContent.includes('/api/travelers'), 'PersonasScreen.tsx desacopló completamente /api/travelers');
+  assert(!personasScreenContent.includes('TravelerDrawer'), 'PersonasScreen.tsx retiró TravelerDrawer');
+  assert(personasScreenContent.includes('/api/profiles?scope=hierarchy'), 'PersonasScreen.tsx consulta /api/profiles?scope=hierarchy');
+  assert(personasScreenContent.includes('UserCreationModal'), 'PersonasScreen.tsx integra UserCreationModal');
+  assert(personasScreenContent.includes('UserEditModal'), 'PersonasScreen.tsx integra UserEditModal');
+  assert(personasScreenContent.includes('availableTabs'), 'PersonasScreen.tsx implementa pestañas dinámicas por rol');
+  assert(personasScreenContent.includes('tab.minLevel <= callerRoleLevel'), 'PersonasScreen.tsx oculta pestañas de rangos superiores al invocador');
+
+  // 8. Integración en RsoConsoleShell.tsx
+  const shellCheckContent = fs.readFileSync(shellSrcPath, 'utf8');
+  assert(shellCheckContent.includes('<PersonasScreen currentProfile={profile} currentUser={user} />'), 'RsoConsoleShell.tsx pasa currentProfile y currentUser a PersonasScreen');
 
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);

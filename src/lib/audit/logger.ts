@@ -19,7 +19,9 @@ export type AuditAction =
   | 'TRAVELER_CREDENTIAL_ROTATED'
   | 'BRIEFING_CREATED'
   | 'BRIEFING_MODIFIED'
-  | 'BRIEFING_DELETED';
+  | 'BRIEFING_DELETED'
+  | 'USER_CREATED'
+  | 'USER_UPDATED';
 
 export type AuditEntityType = 
   | 'ZONE'

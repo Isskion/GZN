@@ -150,7 +150,9 @@ export function RsoConsoleShell({ user, profile }: RsoConsoleShellProps) {
               }}
             />
           )}
-          {activeScreen === 'personas' && <PersonasScreen />}
+          {activeScreen === 'personas' && (
+            <PersonasScreen currentProfile={profile} currentUser={user} />
+          )}
           {activeScreen === 'briefings' && <BriefingsScreen />}
           {activeScreen === 'mensajes' && <MensajesScreen />}
         </div>

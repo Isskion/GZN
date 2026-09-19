@@ -73,6 +73,7 @@ export interface Profile {
   id: string;
   organization_id: string;
   full_name: string;
+  email?: string | null;
   role: UserRole;
   role_level: number;
   admin_origin?: 'GZN' | 'CLIENT' | null;
