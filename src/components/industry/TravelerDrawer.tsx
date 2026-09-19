@@ -1,27 +1,67 @@
 'use client';
 
-import React from 'react';
-import { X, Battery, MapPin, Radio, Phone, UserCheck, AlertTriangle } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Battery, MapPin, Radio, Phone, UserCheck, AlertTriangle, Shield, Layers, RefreshCw } from 'lucide-react';
 import { Traveler, TravelerStatus } from '@/types/database';
+
+export interface ZoneOption {
+  id: string;
+  name: string;
+  severity?: string;
+  color_hex?: string;
+  assigned_rso_id?: string | null;
+  assigned_rso_name?: string | null;
+  assigned_rso?: {
+    id: string;
+    full_name: string;
+    role?: string;
+    phone?: string;
+  } | null;
+}
 
 interface TravelerDrawerProps {
   traveler: Traveler | null;
   isOpen: boolean;
   onClose: () => void;
+  availableZones?: ZoneOption[];
+  onReassignZone?: (travelerId: string, newZoneId: string | null) => Promise<void>;
   onViewOnMap?: (traveler: Traveler) => void;
   onRequestCheckIn?: (traveler: Traveler) => void;
   onSendAlert?: (traveler: Traveler) => void;
+  canManageTravelers?: boolean;
 }
 
 export const TravelerDrawer: React.FC<TravelerDrawerProps> = ({
   traveler,
   isOpen,
   onClose,
+  availableZones = [],
+  onReassignZone,
   onViewOnMap,
   onRequestCheckIn,
   onSendAlert,
+  canManageTravelers = false,
 }) => {
+  const [isReassigning, setIsReassigning] = useState(false);
+
   if (!traveler) return null;
+
+  const currentZoneId = traveler.assigned_zone_id || '';
+  const currentZone = availableZones.find((z) => z.id === currentZoneId) || traveler.assigned_zone;
+
+  const handleZoneChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    const newZoneId = val === '' ? null : val;
+    if (newZoneId === traveler.assigned_zone_id) return;
+
+    if (!onReassignZone) return;
+    setIsReassigning(true);
+    try {
+      await onReassignZone(traveler.id, newZoneId);
+    } finally {
+      setIsReassigning(false);
+    }
+  };
 
   const getStatusBadge = (status: TravelerStatus) => {
     switch (status) {
@@ -116,7 +156,66 @@ export const TravelerDrawer: React.FC<TravelerDrawerProps> = ({
               <span className="font-mono text-[11px]">
                 {traveler.last_latitude && traveler.last_longitude
                   ? `${traveler.last_latitude.toFixed(4)}, ${traveler.last_longitude.toFixed(4)}`
-                  : 'N/D'}
+                  : 'Sin señal GPS'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Adscripción Táctica: Zona de Seguridad y Reasignación Ágil */}
+        <div className="border border-[var(--color-divider)] p-3 rounded-[var(--radius-sm)] space-y-2 bg-[color-mix(in_srgb,var(--color-surface)_40%,transparent)]">
+          <div className="flex items-center justify-between">
+            <span className="kicker flex items-center gap-1">
+              <Layers className="w-3.5 h-3.5 text-[var(--color-accent)]" />
+              <span>Zona de Seguridad</span>
+            </span>
+            {isReassigning && (
+              <span className="text-[10px] font-mono text-[var(--color-accent)] flex items-center gap-1 animate-pulse">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                <span>Reasignando...</span>
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-1.5 text-xs">
+            {canManageTravelers && onReassignZone ? (
+              <div>
+                <label className="block text-[10px] uppercase text-muted font-heading mb-1">
+                  Reasignar Zona Táctica (1-Clic)
+                </label>
+                <select
+                  value={currentZoneId}
+                  onChange={handleZoneChange}
+                  disabled={isReassigning}
+                  className="w-full px-2.5 py-1.5 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:border-[var(--color-accent)] focus:outline-none"
+                >
+                  <option value="">-- Sin zona (En Tránsito / General) --</option>
+                  {availableZones.map((z) => (
+                    <option key={z.id} value={z.id}>
+                      {z.name} [{z.severity || 'ZONA'}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between py-1">
+                <span className="text-muted">Zona Actual:</span>
+                <span className="font-mono font-semibold text-[var(--color-accent)]">
+                  {currentZone?.name || 'En Tránsito / Sin Zona'}
+                </span>
+              </div>
+            )}
+
+            {/* Mando Operativo Responsable */}
+            <div className="pt-1.5 border-t border-[var(--color-divider)] text-[11px] font-mono flex items-center justify-between">
+              <span className="text-muted flex items-center gap-1">
+                <Shield className="w-3 h-3 text-[var(--color-accent)]" />
+                <span>Mando RSO:</span>
+              </span>
+              <span className="font-semibold text-[var(--color-text)]">
+                {currentZone?.assigned_rso?.full_name ||
+                  (currentZone as any)?.assigned_rso_name ||
+                  'Supervisión Global'}
               </span>
             </div>
           </div>

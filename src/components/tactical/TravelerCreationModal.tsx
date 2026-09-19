@@ -33,7 +33,8 @@ export const TravelerCreationModal: React.FC<TravelerCreationModalProps> = ({
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [assignedRsoId, setAssignedRsoId] = useState('');
+  const [assignedZoneId, setAssignedZoneId] = useState('');
+  const [availableZones, setAvailableZones] = useState<any[]>([]);
   const [rsoProfiles, setRsoProfiles] = useState<any[]>([]);
 
   // Posición inicial (Decisión Daniel / Claude: Opción C Híbrida)
@@ -57,26 +58,40 @@ export const TravelerCreationModal: React.FC<TravelerCreationModalProps> = ({
     }
   }, [initialCoordinates, isOpen]);
 
-  // Cargar lista de RSOs de la organización para asignación
+  // Cargar lista de zonas y RSOs de la organización para asignación táctica
   useEffect(() => {
     if (!isOpen) return;
-    const fetchProfiles = async () => {
+    const fetchData = async () => {
       try {
-        const res = await fetch('/api/profiles');
-        if (!res.ok) return;
-        const data = await res.json();
-        const rsos = (data.profiles || []).filter(
-          (p: any) => ['RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(p.role) && p.is_active
-        );
-        setRsoProfiles(rsos);
-        if (rsos.length > 0 && !assignedRsoId) {
-          setAssignedRsoId(rsos[0].id);
+        const [zonesRes, profilesRes] = await Promise.all([
+          fetch('/api/zones'),
+          fetch('/api/profiles'),
+        ]);
+
+        if (zonesRes.ok) {
+          const zData = await zonesRes.json();
+          const zonesList = (zData.features || []).map((f: any) => ({
+            id: f.properties.id,
+            name: f.properties.name,
+            severity: f.properties.severity,
+            zone_type: f.properties.zone_type,
+            assigned_rso_id: f.properties.assigned_rso_id,
+          }));
+          setAvailableZones(zonesList);
+        }
+
+        if (profilesRes.ok) {
+          const pData = await profilesRes.json();
+          const rsos = (pData.profiles || []).filter(
+            (p: any) => ['RSO', 'CONTROL_TOWER', 'ORG_ADMIN'].includes(p.role) && p.is_active
+          );
+          setRsoProfiles(rsos);
         }
       } catch (err) {
-        console.error('Error al cargar perfiles RSO:', err);
+        console.error('Error al cargar zonas o perfiles:', err);
       }
     };
-    fetchProfiles();
+    fetchData();
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -129,7 +144,7 @@ export const TravelerCreationModal: React.FC<TravelerCreationModalProps> = ({
         full_name: cleanName,
         phone: cleanPhone,
         email: email.trim() || null,
-        assigned_rso_id: assignedRsoId || null,
+        assigned_zone_id: assignedZoneId || null,
       };
 
       if (usePosition && parsedLat !== null && parsedLon !== null) {
@@ -158,6 +173,11 @@ export const TravelerCreationModal: React.FC<TravelerCreationModalProps> = ({
       setIsLoading(false);
     }
   };
+
+  const selectedZone = availableZones.find((z) => z.id === assignedZoneId);
+  const selectedZoneRso = selectedZone?.assigned_rso_id
+    ? rsoProfiles.find((p) => p.id === selectedZone.assigned_rso_id)
+    : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm overflow-y-auto">
@@ -273,23 +293,43 @@ export const TravelerCreationModal: React.FC<TravelerCreationModalProps> = ({
             </div>
           </div>
 
-          {/* Asignación de Oficial RSO */}
+          {/* Asignación Táctica de Zona de Seguridad */}
           <div>
-            <label className="block text-[10px] font-heading font-semibold uppercase tracking-wider opacity-70 mb-1">
-              Oficial RSO Responsable
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[10px] font-heading font-semibold uppercase tracking-wider text-[var(--color-accent)]">
+                Zona de Seguridad Asignada
+              </label>
+              <span className="text-[9px] font-mono opacity-50">
+                {availableZones.length} zonas disponibles
+              </span>
+            </div>
             <select
-              value={assignedRsoId}
-              onChange={(e) => setAssignedRsoId(e.target.value)}
+              value={assignedZoneId}
+              onChange={(e) => setAssignedZoneId(e.target.value)}
               className="w-full px-3 py-1.5 bg-[var(--color-bg)] border border-[var(--color-divider)] text-xs font-mono focus:border-[var(--color-accent)] focus:outline-none"
             >
-              <option value="">-- Sin RSO asignado (Bolsa General) --</option>
-              {rsoProfiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.full_name} ({p.role})
+              <option value="">-- Sin zona asignada (Bolsa General / En Tránsito) --</option>
+              {availableZones.map((z) => (
+                <option key={z.id} value={z.id}>
+                  {z.name} [{z.severity}] ({z.zone_type})
                 </option>
               ))}
             </select>
+
+            {/* Mando RSO derivado de la zona */}
+            {selectedZone && (
+              <div className="mt-1.5 py-1 px-2 bg-[var(--color-surface)] border border-[var(--color-divider)] text-[10px] font-mono flex items-center justify-between">
+                <span className="text-[var(--color-text-muted)] flex items-center gap-1">
+                  <Shield className="w-3 h-3 text-[var(--color-accent)]" />
+                  <span>Mando Táctico Derivado:</span>
+                </span>
+                <span className="text-[var(--color-accent)] font-semibold">
+                  {selectedZoneRso
+                    ? `${selectedZoneRso.full_name} (${selectedZoneRso.role})`
+                    : 'Supervisión Global (Sin RSO Asignado)'}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Posicionamiento Inicial (Opción C Híbrida - Decisión Daniel / Claude) */}

@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { getAuthenticatedSession } from '@/lib/auth/session';
 import { hashDeviceSecret } from '@/lib/auth/device';
 import { logAuditEvent } from '@/lib/audit/logger';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { TravelerStatus } from '@/types/database';
 
 const VALID_STATUSES: TravelerStatus[] = ['SAFE', 'WARNING', 'DANGER', 'PANIC', 'INCOMMUNICADO'];
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const statusParam = searchParams.get('status') || 'ALL';
     const assignedRsoId = searchParams.get('assigned_rso_id');
+    const assignedZoneId = searchParams.get('assigned_zone_id');
     const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '50', 10) || 50, 1), 100);
     const offset = Math.max(parseInt(searchParams.get('offset') || '0', 10) || 0, 0);
 
@@ -37,12 +39,20 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    if (assignedZoneId && !UUID_REGEX.test(assignedZoneId)) {
+      return NextResponse.json(
+        { error: 'Parámetro assigned_zone_id inválido. Debe ser un UUID válido.' },
+        { status: 400 }
+      );
+    }
+
     // Regla de Oro: device_secret_hash NUNCA se proyecta ni se devuelve en respuestas de lectura
     let query = supabase
       .from('travelers')
       .select(`
         id,
         organization_id,
+        assigned_zone_id,
         assigned_rso_id,
         user_id,
         full_name,
@@ -57,6 +67,15 @@ export async function GET(request: NextRequest) {
         battery_level,
         created_at,
         updated_at,
+        assigned_zone:zones!assigned_zone_id (
+          id,
+          name,
+          severity,
+          color_hex,
+          zone_type,
+          assigned_rso_id,
+          assigned_rso:profiles!assigned_rso_id (id, full_name, role, phone)
+        ),
         assigned_rso:profiles!assigned_rso_id (id, full_name, role, phone)
       `)
       .order('full_name', { ascending: true });
@@ -73,6 +92,10 @@ export async function GET(request: NextRequest) {
 
     if (assignedRsoId) {
       query = query.eq('assigned_rso_id', assignedRsoId);
+    }
+
+    if (assignedZoneId) {
+      query = query.eq('assigned_zone_id', assignedZoneId);
     }
 
     query = query.range(offset, offset + limit - 1);
@@ -131,6 +154,7 @@ export async function POST(request: NextRequest) {
       phone,
       email,
       callsign,
+      assigned_zone_id,
       assigned_rso_id,
       user_id,
       generate_device_secret,
@@ -145,6 +169,36 @@ export async function POST(request: NextRequest) {
 
     if (!phone || typeof phone !== 'string' || phone.trim() === '') {
       return NextResponse.json({ error: 'El campo "phone" es obligatorio.' }, { status: 400 });
+    }
+
+    let validZoneId: string | null = null;
+    let resolvedRsoId: string | null = assigned_rso_id || null;
+
+    if (assigned_zone_id) {
+      if (!UUID_REGEX.test(assigned_zone_id)) {
+        return NextResponse.json({ error: 'assigned_zone_id debe ser un UUID válido.' }, { status: 400 });
+      }
+      // Validación con cliente administrativo para evitar que la RLS de zones (015)
+      // impida a un RSO asignar viajeros a zonas de otros RSOs dentro de su organización.
+      // Tenant isolation garantizado explícitamente mediante .eq('organization_id', profile.organization_id).
+      const adminClient = createAdminClient();
+      const { data: targetZone, error: zoneError } = await adminClient
+        .from('zones')
+        .select('id, organization_id, assigned_rso_id')
+        .eq('id', assigned_zone_id)
+        .eq('organization_id', profile.organization_id)
+        .single();
+
+      if (zoneError || !targetZone) {
+        return NextResponse.json(
+          { error: 'La zona asignada no existe o no pertenece a su organización.' },
+          { status: 400 }
+        );
+      }
+      validZoneId = targetZone.id;
+      if (!resolvedRsoId && targetZone.assigned_rso_id) {
+        resolvedRsoId = targetZone.assigned_rso_id;
+      }
     }
 
     if (assigned_rso_id && !UUID_REGEX.test(assigned_rso_id)) {
@@ -201,7 +255,8 @@ export async function POST(request: NextRequest) {
       .from('travelers')
       .insert({
         organization_id: profile.organization_id,
-        assigned_rso_id: assigned_rso_id || null,
+        assigned_zone_id: validZoneId,
+        assigned_rso_id: resolvedRsoId,
         user_id: user_id || null,
         full_name: full_name.trim(),
         email: email ? String(email).trim() : null,
@@ -217,6 +272,7 @@ export async function POST(request: NextRequest) {
       .select(`
         id,
         organization_id,
+        assigned_zone_id,
         assigned_rso_id,
         user_id,
         full_name,
@@ -229,7 +285,16 @@ export async function POST(request: NextRequest) {
         position_source,
         battery_level,
         created_at,
-        updated_at
+        updated_at,
+        assigned_zone:zones!assigned_zone_id (
+          id,
+          name,
+          severity,
+          color_hex,
+          zone_type,
+          assigned_rso_id,
+          assigned_rso:profiles!assigned_rso_id (id, full_name, role, phone)
+        )
       `)
       .single();
 
@@ -251,6 +316,7 @@ export async function POST(request: NextRequest) {
         traveler_name: newTraveler.full_name,
         callsign: newTraveler.callsign,
         phone: newTraveler.phone,
+        assigned_zone_id: newTraveler.assigned_zone_id,
         assigned_rso_id: newTraveler.assigned_rso_id,
         device_enrolled: Boolean(secretHash),
         position_source: newTraveler.position_source,

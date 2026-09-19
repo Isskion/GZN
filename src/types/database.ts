@@ -93,6 +93,7 @@ export type PositionSource = 'MANUAL_RSO' | 'DEVICE_TELEMETRY';
 export interface Traveler {
   id: string;
   organization_id: string;
+  assigned_zone_id?: string | null;
   assigned_rso_id?: string | null;
   user_id?: string | null;
   full_name: string;
@@ -108,6 +109,26 @@ export interface Traveler {
   device_secret_hash?: string | null;
   created_at: string;
   updated_at: string;
+  assigned_zone?: {
+    id: string;
+    name: string;
+    severity: ZoneSeverity;
+    color_hex: string;
+    zone_type: ZoneType;
+    assigned_rso_id?: string | null;
+    assigned_rso?: {
+      id: string;
+      full_name: string;
+      role: UserRole;
+      phone: string;
+    } | null;
+  } | null;
+  assigned_rso?: {
+    id: string;
+    full_name: string;
+    role: UserRole;
+    phone: string;
+  } | null;
 }
 
 export interface Zone {

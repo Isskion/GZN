@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { getAuthenticatedSession } from '@/lib/auth/session';
 import { hashDeviceSecret } from '@/lib/auth/device';
 import { logAuditEvent, AuditAction } from '@/lib/audit/logger';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -41,6 +42,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .select(`
         id,
         organization_id,
+        assigned_zone_id,
         assigned_rso_id,
         user_id,
         full_name,
@@ -55,6 +57,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         battery_level,
         created_at,
         updated_at,
+        assigned_zone:zones!assigned_zone_id (
+          id,
+          name,
+          severity,
+          color_hex,
+          zone_type,
+          assigned_rso_id,
+          assigned_rso:profiles!assigned_rso_id (id, full_name, role, phone)
+        ),
         assigned_rso:profiles!assigned_rso_id (id, full_name, role, phone)
       `)
       .eq('id', id)
@@ -132,7 +143,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // 1. Obtener datos actuales del viajero (RLS garantiza pertenencia)
     const { data: currentTraveler, error: fetchError } = await supabase
       .from('travelers')
-      .select('id, organization_id, full_name, phone, email, callsign, assigned_rso_id, user_id')
+      .select('id, organization_id, full_name, phone, email, callsign, assigned_zone_id, assigned_rso_id, user_id')
       .eq('id', id)
       .single();
 
@@ -167,6 +178,41 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     if (body.callsign !== undefined) {
       updates.callsign = body.callsign ? String(body.callsign).trim() : null;
+    }
+
+    // Reasignación ágil de zona de seguridad
+    if (body.assigned_zone_id !== undefined) {
+      if (body.assigned_zone_id === null || body.assigned_zone_id === '') {
+        updates.assigned_zone_id = null;
+        if (body.assigned_rso_id === undefined) {
+          updates.assigned_rso_id = null;
+        }
+      } else {
+        if (!UUID_REGEX.test(body.assigned_zone_id)) {
+          return NextResponse.json({ error: 'assigned_zone_id debe ser un UUID válido.' }, { status: 400 });
+        }
+        // Validación con cliente administrativo para evitar que la RLS de zones (015)
+        // impida a un RSO reasignar viajeros a zonas de otros RSOs dentro de su organización.
+        // Tenant isolation garantizado explícitamente mediante .eq('organization_id', currentTraveler.organization_id).
+        const adminClient = createAdminClient();
+        const { data: targetZone, error: zoneError } = await adminClient
+          .from('zones')
+          .select('id, organization_id, assigned_rso_id')
+          .eq('id', body.assigned_zone_id)
+          .eq('organization_id', currentTraveler.organization_id)
+          .single();
+
+        if (zoneError || !targetZone) {
+          return NextResponse.json(
+            { error: 'La zona asignada no existe o no pertenece a su organización.' },
+            { status: 400 }
+          );
+        }
+        updates.assigned_zone_id = targetZone.id;
+        if (body.assigned_rso_id === undefined) {
+          updates.assigned_rso_id = targetZone.assigned_rso_id || null;
+        }
+      }
     }
 
     if (body.assigned_rso_id !== undefined) {
@@ -225,6 +271,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       .select(`
         id,
         organization_id,
+        assigned_zone_id,
         assigned_rso_id,
         user_id,
         full_name,
@@ -238,7 +285,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         last_ping_at,
         battery_level,
         created_at,
-        updated_at
+        updated_at,
+        assigned_zone:zones!assigned_zone_id (
+          id,
+          name,
+          severity,
+          color_hex,
+          zone_type,
+          assigned_rso_id,
+          assigned_rso:profiles!assigned_rso_id (id, full_name, role, phone)
+        )
       `)
       .single();
 
@@ -262,6 +318,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         traveler_name: updates.full_name ?? currentTraveler.full_name,
         updated_fields: Object.keys(updates).filter((k) => k !== 'updated_at' && k !== 'device_secret_hash'),
         credential_rotated: isRotating,
+        previous_zone_id: currentTraveler.assigned_zone_id,
+        new_zone_id: updates.assigned_zone_id !== undefined ? updates.assigned_zone_id : currentTraveler.assigned_zone_id,
       },
     });
 

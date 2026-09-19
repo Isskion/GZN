@@ -1641,6 +1641,70 @@ async function runTests() {
   assert(personasScreenUpdated.includes('p.controlled_zone_ids'), 'PersonasScreen visualiza número de zonas controladas por RSO');
   assert(personasScreenUpdated.includes('p.excluded_zone_ids'), 'PersonasScreen visualiza número de zonas excluidas por CONTROL_TOWER');
 
+  // ----------------------------------------------------------------------------
+  // 23. Asociación del Rebaño a Zonas Tácticas y Reasignación Ágil (Mandato Daniel / Claude)
+  // ----------------------------------------------------------------------------
+  console.log('\n--- 23. Asociación de Travelers a Zonas Tácticas y Reasignación Ágil ---');
+
+  // 1. Migración SQL 016
+  const mig016Path = path.resolve(process.cwd(), 'sql/016_travelers_assigned_zone.sql');
+  assert(fs.existsSync(mig016Path), 'sql/016_travelers_assigned_zone.sql existe');
+  const mig016Content = fs.readFileSync(mig016Path, 'utf8');
+  assert(mig016Content.includes('ALTER TABLE public.travelers') && mig016Content.includes('assigned_zone_id UUID REFERENCES public.zones(id)'), 'Migración 016 añade assigned_zone_id a public.travelers');
+  assert(mig016Content.includes('CREATE INDEX IF NOT EXISTS idx_travelers_org_zone'), 'Migración 016 crea índice compuesto idx_travelers_org_zone');
+  assert(mig016Content.includes('CREATE OR REPLACE FUNCTION public.sync_traveler_assigned_rso()'), 'Migración 016 define función sync_traveler_assigned_rso()');
+  assert(mig016Content.includes('CREATE TRIGGER trg_sync_traveler_assigned_rso'), 'Migración 016 define trigger BEFORE en travelers al cambiar assigned_zone_id (Corrección Claude)');
+  assert(mig016Content.includes('CREATE OR REPLACE FUNCTION public.propagate_zone_assigned_rso_to_travelers()'), 'Migración 016 define función propagate_zone_assigned_rso_to_travelers()');
+  assert(mig016Content.includes('CREATE TRIGGER trg_propagate_zone_rso_to_travelers'), 'Migración 016 define trigger AFTER en zones al cambiar assigned_rso_id (Corrección Claude)');
+  assert(mig016Content.includes('Users can view travelers in their operational zone scope'), 'Migración 016 define política RLS SELECT acotada por ámbito de zona');
+  assert(mig016Content.includes('assigned_zone_id IS NULL'), 'Migración 016 permite visibilidad de recursos en tránsito sin zona');
+  assert(mig016Content.includes('EXISTS (') && mig016Content.includes('FROM public.zones z'), 'Migración 016 cruza con jerarquía de zones sin riesgo de recursión');
+
+  // 2. Tipos de Base de Datos
+  const dbTypesTravelerContent = fs.readFileSync(userMgmtDbTypesPath, 'utf8');
+  assert(dbTypesTravelerContent.includes('assigned_zone_id?: string | null;'), 'Traveler en database.ts incluye assigned_zone_id');
+  assert(dbTypesTravelerContent.includes('assigned_zone?:'), 'Traveler en database.ts incluye relación tipada assigned_zone');
+
+  // 3. Backend: GET y POST /api/travelers
+  const travelersRoutePath = path.resolve(process.cwd(), 'src/app/api/travelers/route.ts');
+  const travelersApiContent = fs.readFileSync(travelersRoutePath, 'utf8');
+  assert(travelersApiContent.includes("searchParams.get('assigned_zone_id')"), 'GET /api/travelers soporta filtro assigned_zone_id');
+  assert(travelersApiContent.includes('assigned_zone:zones!assigned_zone_id'), 'GET /api/travelers proyecta metadatos y mando de assigned_zone');
+  assert(travelersApiContent.includes('assigned_zone_id,') && travelersApiContent.includes('validZoneId = targetZone.id'), 'POST /api/travelers recibe y valida pertenencia de tenant para assigned_zone_id');
+  assert(travelersApiContent.includes('adminClient = createAdminClient()') && travelersApiContent.includes("eq('organization_id', profile.organization_id)"), 'POST /api/travelers valida zona con adminClient para permitir asignación inter-RSO sin bloqueo de RLS 015');
+  assert(travelersApiContent.includes('assigned_zone_id: newTraveler.assigned_zone_id'), 'POST /api/travelers registra assigned_zone_id en auditoría forense');
+
+  // 4. Backend: GET y PATCH /api/travelers/[id]
+  const travelerIdRoutePath = path.resolve(process.cwd(), 'src/app/api/travelers/[id]/route.ts');
+  const travelerIdApiContent = fs.readFileSync(travelerIdRoutePath, 'utf8');
+  assert(travelerIdApiContent.includes('assigned_zone_id,') && travelerIdApiContent.includes('assigned_zone:zones!assigned_zone_id'), 'GET /api/travelers/[id] proyecta assigned_zone');
+  assert(travelerIdApiContent.includes('body.assigned_zone_id !== undefined'), 'PATCH /api/travelers/[id] implementa reasignación ágil de zona');
+  assert(travelerIdApiContent.includes('adminClient = createAdminClient()') && travelerIdApiContent.includes("eq('organization_id', currentTraveler.organization_id)"), 'PATCH /api/travelers/[id] valida zona con adminClient para reasignación ágil inter-RSO sin bloqueo de RLS 015');
+  assert(travelerIdApiContent.includes('previous_zone_id: currentTraveler.assigned_zone_id') && travelerIdApiContent.includes('new_zone_id:'), 'PATCH /api/travelers/[id] registra trazabilidad de cambio de zona en auditoría');
+
+  // 5. Componente TravelerCreationModal.tsx
+  const travModalContent = fs.readFileSync(path.resolve(process.cwd(), 'src/components/tactical/TravelerCreationModal.tsx'), 'utf8');
+  assert(travModalContent.includes("fetch('/api/zones')"), 'TravelerCreationModal consulta /api/zones para asignación táctica');
+  assert(travModalContent.includes('assignedZoneId'), 'TravelerCreationModal gestiona estado assignedZoneId');
+  assert(travModalContent.includes('Mando Táctico Derivado:'), 'TravelerCreationModal muestra mando derivado de la zona');
+  assert(travModalContent.includes('assigned_zone_id: assignedZoneId || null'), 'TravelerCreationModal envía assigned_zone_id en POST');
+
+  // 6. Componente TravelerDrawer.tsx
+  const drawerContent = fs.readFileSync(path.resolve(process.cwd(), 'src/components/industry/TravelerDrawer.tsx'), 'utf8');
+  assert(drawerContent.includes('export interface ZoneOption'), 'TravelerDrawer exporta interface ZoneOption');
+  assert(drawerContent.includes('availableZones?: ZoneOption[]'), 'TravelerDrawer recibe availableZones');
+  assert(drawerContent.includes('onReassignZone?:'), 'TravelerDrawer recibe callback onReassignZone');
+  assert(drawerContent.includes('handleZoneChange'), 'TravelerDrawer implementa selector de reasignación táctica de 1 clic');
+
+  // 7. Pantalla TerrenoScreen.tsx
+  const terrenoScreenZoneContent = fs.readFileSync(path.resolve(process.cwd(), 'src/components/screens/TerrenoScreen.tsx'), 'utf8');
+  assert(terrenoScreenZoneContent.includes("import { TravelerDrawer"), 'TerrenoScreen importa TravelerDrawer');
+  assert(terrenoScreenZoneContent.includes('<TravelerDrawer'), 'TerrenoScreen integra TravelerDrawer');
+  assert(terrenoScreenZoneContent.includes('handleReassignTravelerZone'), 'TerrenoScreen implementa handleReassignTravelerZone conectado a PATCH /api/travelers/[id]');
+  assert(terrenoScreenZoneContent.includes('assigned_zone_name'), 'TerrenoScreen visualiza badges de zona en la lista de activos');
+  assert(terrenoScreenZoneContent.includes('withCoords = travelers.filter(') && terrenoScreenZoneContent.includes('withCoords[0]'), 'TerrenoScreen protege simulaciones usando withCoords (Precisión Claude)');
+  assert(!terrenoScreenZoneContent.includes("rawList\n          .filter((t: any) => typeof t.last_latitude === 'number'"), 'TerrenoScreen no excluye viajeros sin coordenadas de la lista del sector');
+
   console.log('\n================================================================');
   console.log(`TOTAL PRUEBAS: ${passed + failed} | EXITOSAS: ${passed} | FALLIDAS: ${failed}`);
   console.log('================================================================\n');
